@@ -1,4 +1,5 @@
 #include "Overlay.h"
+#include <cstring>
 
 void draw_circle_rgb(image& img, int cx, int cy, int r, int R, int G, int B)
 {
@@ -153,11 +154,28 @@ void draw_obstacle_overlay(image& img, const Obstacle& obs, int R, int G, int B)
     int y = obs.y;
     int w = obs.w;
     int h = obs.h;
+
+    // draw bounding box (same as before)
     draw_rect_rgb(img, x, y, w, h, R, G, B);
 
-    // area label (rounded)
+    // draw centroid marker similar to the blue/red blobs so obstacles are clearly visible
+    int cx = (int)std::round(obs.cx);
+    int cy = (int)std::round(obs.cy);
+    draw_circle_rgb(img, cx, cy, 8, R, G, B);
+
+    // area label (rounded) with a small background for readability
     char buf[32];
     int area_i = (int)std::round(obs.area);
     sprintf(buf, "A:%d", area_i);
-    draw_text_rgb(img, x, y - 8, buf, R, G, B);
+
+    int tx = x;
+    int ty = y - 10; // place text above bbox if possible
+    int tw = (int)std::strlen(buf) * 6;
+    int th = 9;
+
+    // background (semi-opaque effect by drawing a black rectangle behind the text)
+    draw_filled_rect_rgb(img, tx, ty, tw, th, 0, 0, 0);
+
+    // text (slightly offset for padding)
+    draw_text_rgb(img, tx + 1, ty + 1, buf, R, G, B);
 }

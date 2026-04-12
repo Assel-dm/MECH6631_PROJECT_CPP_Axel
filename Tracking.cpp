@@ -1,6 +1,7 @@
 #include "Tracking.h"
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 static RobotDet compute_pose(const Blob& f, const Blob& r) {
     double dx = f.x - r.x;
@@ -144,4 +145,27 @@ std::vector<RobotTrack> Tracker::updateTracks(
     }
 
     return tracks;
+}
+
+std::optional<double> estimate_marker_sep_px(const std::vector<Blob>& front_blobs,
+                                             const std::vector<Blob>& rear_blobs)
+{
+    if (front_blobs.empty() || rear_blobs.empty()) return std::nullopt;
+
+    std::vector<double> dists;
+    dists.reserve(front_blobs.size());
+    for (const auto &f : front_blobs) {
+        double fx = f.x, fy = f.y;
+        double best = std::numeric_limits<double>::infinity();
+        for (const auto &r : rear_blobs) {
+            double d = std::hypot(fx - r.x, fy - r.y);
+            if (d < best) best = d;
+        }
+        if (std::isfinite(best)) dists.push_back(best);
+    }
+    if (dists.empty()) return std::nullopt;
+    std::sort(dists.begin(), dists.end());
+    size_t n = dists.size();
+    if (n % 2 == 1) return dists[n/2];
+    return 0.5 * (dists[n/2 - 1] + dists[n/2]);
 }

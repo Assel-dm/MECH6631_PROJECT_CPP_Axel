@@ -142,10 +142,12 @@
     <ClCompile Include="Fuzzy.cpp" />
     <ClCompile Include="IDDance.cpp" />
     <ClCompile Include="MarkerDetector.cpp" />
+    <ClCompile Include="ObstaclePipeline.cpp" />
     <ClCompile Include="Obstacles.cpp" />
     <ClCompile Include="OccupancyGrid.cpp" />
     <ClCompile Include="Offense.cpp" />
     <ClCompile Include="Overlay.cpp" />
+    <ClCompile Include="pair_test.cpp" />
     <ClCompile Include="program.cpp" />
     <ClCompile Include="robot.cpp" />
     <ClCompile Include="shared_memory.cpp" />
@@ -163,6 +165,7 @@
     <ClInclude Include="IDDance.h" />
     <ClInclude Include="image_transfer.h" />
     <ClInclude Include="MarkerDetector.h" />
+    <ClInclude Include="ObstaclePipeline.h" />
     <ClInclude Include="Obstacles.h" />
     <ClInclude Include="OccupancyGrid.h" />
     <ClInclude Include="Offense.h" />

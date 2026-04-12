@@ -332,7 +332,7 @@ std::vector<Obstacle> Obstacles::detect(image& rgb,
         }
     }
 
-    // existing morphology / extract / filter (same as other overload)
+    // 5. Morphological cleanup: do opening (erode -> dilate) to remove specks, then a closing
     image tmp;
     alloc_grey(tmp, W, H);
 
@@ -350,6 +350,7 @@ std::vector<Obstacle> Obstacles::detect(image& rgb,
     erode(binary, tmp);
     copy(tmp, binary);
 
+    // 6. Extract obstacles
     auto obs = extract_obstacles(binary, grey);
     int computed_min = std::max(min_area_param, (W * H) / 50000);
     std::vector<Obstacle> filtered;
@@ -391,4 +392,262 @@ std::vector<Obstacle> Obstacles::detect(image& rgb,
     free_image(robot_mask);
 
     return filtered;
+}
+
+// Helper: convert sRGB (0..255) to CIE L,a,b (float)
+static void rgb_to_lab(float R255, float G255, float B255, float &L, float &a, float &b)
+{
+    // normalize to 0..1
+    auto toLin = [](float c) {
+        float sr = c / 255.0f;
+        if (sr <= 0.04045f) return sr / 12.92f;
+        return std::pow((sr + 0.055f) / 1.055f, 2.4f);
+    };
+    float r = toLin(R255);
+    float g = toLin(G255);
+    float bl = toLin(B255);
+
+    // Linear RGB -> XYZ (D65)
+    float X = 0.4124564f * r + 0.3575761f * g + 0.1804375f * bl;
+    float Y = 0.2126729f * r + 0.7151522f * g + 0.0721750f * bl;
+    float Z = 0.0193339f * r + 0.1191920f * g + 0.9503041f * bl;
+
+    // Reference white D65
+    const float Xn = 0.95047f, Yn = 1.0f, Zn = 1.08883f;
+
+    auto f = [](float t) {
+        if (t > 0.008856f) return std::cbrt(t);
+        return (7.787f * t) + (16.0f / 116.0f);
+    };
+
+    float fx = f(X / Xn);
+    float fy = f(Y / Yn);
+    float fz = f(Z / Zn);
+
+    L = 116.0f * fy - 16.0f;
+    a = 500.0f * (fx - fy);
+    b = 200.0f * (fy - fz);
+}
+
+// New detector: floor-model in Lab space with optional robot exclusion mask
+std::vector<Obstacle> Obstacles::detect_floor_model(image& rgb,
+                                                    image* robot_mask,
+                                                    float kL, float ka, float kb,
+                                                    int min_area_param)
+{
+    int W = rgb.width;
+    int H = rgb.height;
+
+    // grey copy for centroid calculations
+    image grey;
+    alloc_grey(grey, W, H);
+    copy(rgb, grey);
+
+    // 1) compute per-channel mean/std over pixels NOT in robot_mask
+    double sumL=0.0, sumA=0.0, sumB=0.0;
+    size_t count = 0;
+    // first pass: compute means
+    for (int j = 0; j < H; ++j) {
+        for (int i = 0; i < W; ++i) {
+            int idx = j * W + i;
+            if (robot_mask && robot_mask->pdata[idx]) continue;
+            int ridx = 3 * idx;
+            float R = (float)rgb.pdata[ridx + 2];
+            float G = (float)rgb.pdata[ridx + 1];
+            float B = (float)rgb.pdata[ridx + 0];
+            float Lf, af, bf;
+            rgb_to_lab(R, G, B, Lf, af, bf);
+            sumL += Lf; sumA += af; sumB += bf;
+            ++count;
+        }
+    }
+    if (count < 16) { // fallback to all pixels if too few samples
+        count = 0;
+        sumL = sumA = sumB = 0.0;
+        for (int j = 0; j < H; ++j) {
+            for (int i = 0; i < W; ++i) {
+                int idx = j * W + i;
+                int ridx = 3 * idx;
+                float R = (float)rgb.pdata[ridx + 2];
+                float G = (float)rgb.pdata[ridx + 1];
+                float B = (float)rgb.pdata[ridx + 0];
+                float Lf, af, bf;
+                rgb_to_lab(R, G, B, Lf, af, bf);
+                sumL += Lf; sumA += af; sumB += bf;
+                ++count;
+            }
+        }
+    }
+    double muL = sumL / (double)count;
+    double muA = sumA / (double)count;
+    double muB = sumB / (double)count;
+
+    // second pass: compute stddev
+    double sL=0.0, sA=0.0, sB=0.0;
+    for (int j = 0; j < H; ++j) {
+        for (int i = 0; i < W; ++i) {
+            int idx = j * W + i;
+            if (robot_mask && robot_mask->pdata[idx]) continue;
+            int ridx = 3 * idx;
+            float R = (float)rgb.pdata[ridx + 2];
+            float G = (float)rgb.pdata[ridx + 1];
+            float B = (float)rgb.pdata[ridx + 0];
+            float Lf, af, bf;
+            rgb_to_lab(R, G, B, Lf, af, bf);
+            sL += (Lf - muL) * (Lf - muL);
+            sA += (af - muA) * (af - muA);
+            sB += (bf - muB) * (bf - muB);
+        }
+    }
+    double denom = std::max<size_t>(1, count - 1);
+    double sigL = std::sqrt(sL / denom) + 1e-6;
+    double sigA = std::sqrt(sA / denom) + 1e-6;
+    double sigB = std::sqrt(sB / denom) + 1e-6;
+
+    // 2) build obs mask based on per-channel z-scores
+    image obs_mask;
+    alloc_grey(obs_mask, W, H);
+    std::memset(obs_mask.pdata, 0, W * H);
+
+    for (int j = 0; j < H; ++j) {
+        for (int i = 0; i < W; ++i) {
+            int idx = j * W + i;
+            int ridx = 3 * idx;
+            float R = (float)rgb.pdata[ridx + 2];
+            float G = (float)rgb.pdata[ridx + 1];
+            float B = (float)rgb.pdata[ridx + 0];
+            float Lf, af, bf;
+            rgb_to_lab(R, G, B, Lf, af, bf);
+            double zL = std::abs((Lf - muL) / sigL);
+            double zA = std::abs((af - muA) / sigA);
+            double zB = std::abs((bf - muB) / sigB);
+            if ((zL > kL) || (zA > ka) || (zB > kb)) {
+                if (!(robot_mask && robot_mask->pdata[idx])) {
+                    obs_mask.pdata[idx] = 255;
+                }
+            }
+        }
+    }
+
+    // 3) morphological cleanup (opening then closing) using existing functions
+    image tmp;
+    alloc_grey(tmp, W, H);
+
+    // opening (erode twice -> dilate twice)
+    erode(obs_mask, tmp);
+    erode(tmp, tmp);
+    copy(tmp, obs_mask);
+
+    dialate(obs_mask, tmp);
+    dialate(tmp, obs_mask);
+
+    // closing (bridge small gaps)
+    dialate(obs_mask, tmp);
+    copy(tmp, obs_mask);
+    erode(obs_mask, tmp);
+    copy(tmp, obs_mask);
+
+    // 4) extract obstacles using existing function (uses label_image + centroid)
+    auto obs = extract_obstacles(obs_mask, grey);
+
+    // filter by area param (similar heuristic to other detect)
+    int computed_min = std::max(min_area_param, (W * H) / 50000);
+    std::vector<Obstacle> filtered;
+    for (auto &o : obs) if (o.area >= computed_min) filtered.push_back(o);
+
+    // --- DEBUG: stats + overlay ---------------------------------
+    int total_px = W * H;
+    int binary_count = 0;
+    for (int i = 0; i < total_px; ++i) binary_count += (obs_mask.pdata[i] != 0);
+
+    int robot_mask_count = 0;
+    if (robot_mask) {
+        for (int i = 0; i < total_px; ++i) robot_mask_count += (robot_mask->pdata[i] != 0);
+    }
+
+    std::cerr << "[Obstacles::floor_model] samples=" << count
+              << "  muL=" << muL << " muA=" << muA << " muB=" << muB
+              << "  sigL=" << sigL << " sigA=" << sigA << " sigB=" << sigB
+              << "  k=(" << kL << "," << ka << "," << kb << ")"
+              << "  robot_mask_pct=" << (100.0 * robot_mask_count) / total_px
+              << "%  binary_px=" << binary_count << " / " << total_px
+              << std::endl;
+
+    // create an overlay image: tint detected pixels red on top of the original frame
+    image dbg_overlay;
+    dbg_overlay.type = RGB_IMAGE;
+    dbg_overlay.width = W;
+    dbg_overlay.height = H;
+    allocate_image(dbg_overlay);
+    copy(rgb, dbg_overlay);
+
+    for (int j = 0; j < H; ++j) {
+        for (int i = 0; i < W; ++i) {
+            int idx = j * W + i;
+            if (obs_mask.pdata[idx]) {
+                int ridx = 3 * idx;
+                // simple highlight: set R high, reduce G/B
+                dbg_overlay.pdata[ridx]     = (ibyte)std::min(255, dbg_overlay.pdata[ridx] + 160);
+                dbg_overlay.pdata[ridx + 1] = (ibyte)(dbg_overlay.pdata[ridx + 1] / 2);
+                dbg_overlay.pdata[ridx + 2] = (ibyte)(dbg_overlay.pdata[ridx + 2] / 2);
+            }
+        }
+    }
+    save_rgb_image("obstacles_floor_model_overlay_debug.bmp", dbg_overlay);
+    free_image(dbg_overlay);
+    // -------------------------------------------------------------
+
+    // debug: write binary image
+    image dbg_rgb;
+    dbg_rgb.type = RGB_IMAGE;
+    dbg_rgb.width = W;
+    dbg_rgb.height = H;
+    allocate_image(dbg_rgb);
+    for (int j = 0; j < H; ++j) {
+        for (int i = 0; i < W; ++i) {
+            unsigned char v = obs_mask.pdata[j * W + i];
+            int idx = 3 * (j * W + i);
+            dbg_rgb.pdata[idx]     = v;
+            dbg_rgb.pdata[idx + 1] = v;
+            dbg_rgb.pdata[idx + 2] = v;
+        }
+    }
+    save_rgb_image("obstacles_floor_model_debug.bmp", dbg_rgb);
+    free_image(dbg_rgb);
+
+    // cleanup
+    free_image(tmp);
+    free_image(obs_mask);
+    free_image(grey);
+
+    return filtered;
+}
+
+// Wrapper: build robot_mask from robot_blobs and call detect_floor_model(...)
+std::vector<Obstacle> Obstacles::detect_floor_model(image& rgb,
+                                                    const std::vector<Blob>& robot_blobs,
+                                                    float kL, float ka, float kb,
+                                                    int min_area_param)
+{
+    int W = rgb.width;
+    int H = rgb.height;
+
+    image robot_mask;
+    alloc_grey(robot_mask, W, H);
+    std::memset(robot_mask.pdata, 0, W * H);
+
+    // mark robot pixels: estimate radius from blob area (fallback to fixed radius)
+    for (const auto &b : robot_blobs) {
+        int r = 30; // fallback radius in px
+        if (b.area > 0) {
+            double est_r = std::sqrt((double)b.area / M_PI);
+            r = (int)std::max(8.0, est_r * 1.2); // scale up slightly
+        }
+        draw_filled_circle_mask(robot_mask, (int)std::round(b.x), (int)std::round(b.y), r);
+    }
+
+    auto res = detect_floor_model(rgb, &robot_mask, kL, ka, kb, min_area_param);
+
+    free_image(robot_mask);
+    return res;
 }

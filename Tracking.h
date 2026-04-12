@@ -19,3 +19,7 @@ public:
         double max_match_dist,
         int max_misses);
 };
+
+// Median nearest-neighbor separation estimator (moved from MarkerPairing)
+std::optional<double> estimate_marker_sep_px(const std::vector<Blob>& front_blobs,
+                                             const std::vector<Blob>& rear_blobs);

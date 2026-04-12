@@ -8,6 +8,9 @@
 struct Blob;      // forward-declare
 struct HSVRange;  // forward-declare (defined in MarkerDetector.h)
 
+// ensure this typedef is available before the declaration:
+using ibyte = unsigned char;   // or include the header that defines ibyte/ebyte
+
 class Obstacles {
 public:
     Obstacles();
@@ -25,10 +28,23 @@ public:
                                  const HSVRange& red_range,
                                  int min_area = 50);
 
+    // New: floor-model detector (Lab z-score) with optional robot exclusion mask
+    // - robot_mask may be nullptr
+    std::vector<Obstacle> detect_floor_model(image& rgb,
+                                             image* robot_mask,
+                                             float kL, float ka, float kb,
+                                             int min_area = 50);
+
+    // New overload: floor-model taking robot blobs (builds mask internally)
+    std::vector<Obstacle> detect_floor_model(image& rgb,
+                                             const std::vector<Blob>& robot_blobs,
+                                             float kL, float ka, float kb,
+                                             int min_area = 50);
+
 private:
     // HSV conversion (professor’s code)
-    void rgb_to_hsv(ibyte R, ibyte G, ibyte B,
-        double& h, double& s, double& v);
+    void rgb_to_hsv(ibyte r, ibyte g, ibyte b,
+                    double &h, double &s, double &v);
 
     // Build histogram of saturation (0–1 mapped to 0–255)
     void build_s_histogram(image& rgb, std::vector<int>& hist);
