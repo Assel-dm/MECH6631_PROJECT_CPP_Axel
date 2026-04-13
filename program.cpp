@@ -43,6 +43,14 @@ int main()
     Obstacles obst;
     OccupancyGrid occBuilder;
 
+    // Start with these values and adjust based on your lighting:
+    float kL = 2.5f;  // Lightness sensitivity (2.0 - 3.5)
+    float ka = 2.0f;  // Red-green sensitivity (1.5 - 2.5)
+    float kb = 2.0f;  // Blue-yellow sensitivity (1.5 - 2.5)
+
+    // Lower values = more sensitive (detect more obstacles)
+    // Higher values = less sensitive (fewer false positives)
+
     while (true) {
         if (KEY('X')) break;
 
@@ -67,24 +75,62 @@ int main()
             draw_text_rgb(rgb, (int)d.x + 8, (int)d.y - 8, buf, 0, 255, 0);
         }
 
-        // tuning (try more permissive values)
-        float kL = 1.2f, ka = 0.7f, kb = 0.7f; // looser z-score thresholds
-        int min_area = 200;                    // much smaller to see any detections
+        // tuning
+        int min_area = 1500;          // min obstacle area (px²)
         int cell_px = 10;
-        int inflate_px = 20;                   // small inflation
+        int inflate_px = 20;
 
-        // build robot_blobs from detected marker blobs (front + rear)
-        std::vector<Blob> robot_blobs = front_blobs;
-        robot_blobs.insert(robot_blobs.end(), rear_blobs.begin(), rear_blobs.end());
+        // If you know marker separation and physical robot size:
+        double marker_sep_in = 9.0;
+        double robot_length_in = 15.0;  // Changed from 12.0
+        double robot_width_in = 11.0;   // Changed from 8.0
 
-        // run obstacle pipeline using the allocated `rgb` image
+        // Robot body dimensions (in pixels)
+        int robot_length_px;   // front-to-rear length (along heading)
+        int robot_width_px;    // side-to-side width (perpendicular to heading)
+
+
+        // Compute scale if you have est_sep
+        if (est_sep.has_value()) {
+            double px_per_in = est_sep.value() / marker_sep_in;
+            
+            double safety_factor = 1.0;  // Add safety margin
+            robot_length_px = (int)(robot_length_in * px_per_in * safety_factor);
+            robot_width_px = (int)(robot_width_in * px_per_in * safety_factor);
+        }
+
+        // Run obstacle pipeline using paired detections (oriented rectangles)
         auto pipeline_res = process_frame_obstacles(
-            rgb, robot_blobs, obst, occBuilder,
-            kL, ka, kb, min_area, cell_px, inflate_px, 30, 45
+            rgb, dets, obst, occBuilder,
+            kL, ka, kb,  // <-- RESTORED
+            min_area, cell_px, inflate_px, 
+            robot_length_px, robot_width_px
         );
 
         auto& obstacles = pipeline_res.obstacles;
         Grid occ_grid = pipeline_res.occ_grid;
+
+        // Draw detected obstacles (bounding boxes + area labels)
+        for (auto& obs : obstacles) {
+            draw_obstacle_overlay(rgb, obs, 255, 128, 0); // orange
+        }
+
+        // Optional: draw occupancy grid cells
+        int gh = occ_grid.size();
+        if (gh > 0) {
+            int gw = occ_grid[0].size();
+            for (int gy = 0; gy < gh; ++gy) {
+                for (int gx = 0; gx < gw; ++gx) {
+                    if (occ_grid[gy][gx] == 1) {
+                        int x0 = gx * cell_px;
+                        int y0 = gy * cell_px;
+                        int x1 = std::min(width - 1, (gx + 1) * cell_px - 1);
+                        int y1 = std::min(height - 1, (gy + 1) * cell_px - 1);
+                        // draw_rect_rgb(rgb, x0, y0, x1 - x0 + 1, y1 - y0 + 1, 200, 0, 0); // dark red outline
+                    }
+                }
+            }
+        }
 
         view_rgb_image(rgb);
 

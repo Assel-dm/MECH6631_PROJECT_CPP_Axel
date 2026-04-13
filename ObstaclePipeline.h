@@ -5,31 +5,25 @@
 #include "Obstacles.h"
 #include "OccupancyGrid.h"
 #include <vector>
-
-/*
-  ObstaclePipeline.h
-  Small helper API that builds a robot-exclusion mask, calls Obstacles::detect_floor_model
-  and converts results to an occupancy Grid.
-*/
+#include "MarkerDetector.h"
 
 struct ObstaclePipelineResult {
     std::vector<Obstacle> obstacles;
     Grid occ_grid;
 };
 
-// Process a frame to produce obstacles and an occupancy grid.
-// - robot_blobs: centers of markers (front+rear combined) in pixel coords (Blob.x, Blob.y).
-// - obst: existing Obstacles instance (reused).
-// - grid_builder: existing OccupancyGrid instance.
-// Returns obstacles + grid. Uses vision/image_transfer primitives (no OpenCV).
+// Process frame with oriented robot exclusion rectangles
+// - robot_dets: paired robot detections (front+rear markers with pose)
+// - robot_length_px: length of robot body (front to rear, along heading)
+// - robot_width_px: width of robot body (perpendicular to heading)
 ObstaclePipelineResult process_frame_obstacles(
     image& rgb,
-    const std::vector<Blob>& robot_blobs,
+    const std::vector<RobotDet>& robot_dets,  // CHANGED: use paired detections
     Obstacles& obst,
     OccupancyGrid& grid_builder,
-    float kL, float ka, float kb,
+    float kL, float ka, float kb,    // <-- RESTORE THESE (not gray_threshold)
     int min_area,
     int cell_px,
     int inflate_px,
-    int robot_circle_radius_px = 30,
-    int robot_body_width_px = 45);
+    int robot_length_px = 60,    // NEW: adjustable length
+    int robot_width_px = 40);    // NEW: adjustable width

@@ -42,5 +42,9 @@ private:
     double laser_align_deg_;
     double max_match_dist_px_;
     int max_misses_;
-
+    
+    // Lab floor model thresholds (lighting adaptive)
+    float kL_;
+    float ka_;
+    float kb_;
 };

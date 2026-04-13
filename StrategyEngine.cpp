@@ -1,4 +1,5 @@
 #include "StrategyEngine.h"
+#include "ObstaclePipeline.h"
 #include <cmath>
 #include <iostream>
 
@@ -12,6 +13,11 @@ StrategyEngine::StrategyEngine()
     // Grid + obstacle parameters
     cell_px_ = 20;
     inflate_px_ = 10;
+
+    // Lab floor model thresholds (tune for your lighting)
+    kL_ = 2.5f;  // Lightness sensitivity
+    ka_ = 2.0f;  // Red-green sensitivity
+    kb_ = 2.0f;  // Blue-yellow sensitivity
 
     // Strategy parameters
     lookahead_cells_ = 4;
@@ -72,25 +78,47 @@ Command StrategyEngine::update(image& rgb, double now)
     }
 
     // ------------------------------------------------------------
-    // 4. Detect obstacles (HSV histogram on saturation)
+    // 4. Detect obstacles with proper robot body masking
     // ------------------------------------------------------------
-    auto obstacles = obstacleDetector_.detect(
+    
+    // Physical robot dimensions (adjust to your actual robot size)
+    double marker_sep_in = 9.0;        // marker separation in inches
+    double robot_length_in = 15.0;     // robot length in inches
+    double robot_width_in = 11.0;       // robot width in inches
+    
+    // Compute pixel scale from detected marker separation
+    int robot_length_px = 100;  // default fallback
+    int robot_width_px = 80;
+    
+    if (!dets.empty()) {
+        double avg_sep_px = 0.0;
+        for (const auto& d : dets) avg_sep_px += d.sep_px;
+        avg_sep_px /= dets.size();
+        
+        double px_per_in = avg_sep_px / marker_sep_in;
+        
+        // ADD safety factor here:
+        double safety_factor = 3.5;  // Make masks larger
+        robot_length_px = (int)(robot_length_in * px_per_in * safety_factor);
+        robot_width_px = (int)(robot_width_in * px_per_in * safety_factor);
+    }
+    
+    // Use pipeline with oriented rectangle masking
+    auto pipeline_res = process_frame_obstacles(
         rgb,
-        robot_blobs,
-        markerDetector_.blue_range,
-        markerDetector_.red_range,
-        500 // choose min_area appropriate for your frame size
-    );
-
-    // ------------------------------------------------------------
-    // 5. Build occupancy grid
-    // ------------------------------------------------------------
-    auto grid = occBuilder_.build(
-        obstacles,
-        W, H,
+        dets,               // Uses RobotDet with pose info
+        obstacleDetector_,
+        occBuilder_,
+        kL_, ka_, kb_,
+        500,                // min_area
         cell_px_,
-        inflate_px_
+        inflate_px_,
+        robot_length_px,
+        robot_width_px
     );
+    
+    auto obstacles = pipeline_res.obstacles;
+    auto grid = pipeline_res.occ_grid;
 
     // ------------------------------------------------------------
     // 6. Determine offense or defense mode
