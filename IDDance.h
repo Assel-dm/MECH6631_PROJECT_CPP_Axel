@@ -1,10 +1,10 @@
 #pragma once
-#include "image_transfer.h"
-#include "vision.h"
+
 #include "Types.h"
 #include "MarkerDetector.h"
 #include "Tracking.h"
 #include <vector>
+#include <map>
 
 class IDDance {
 public:
@@ -24,15 +24,14 @@ public:
     // My assigned ID
     int my_id() const { return my_id_; }
 
-    // NEW: Get the wheel + laser command for the current dance state
+    // Get the wheel + laser command for the current dance state
     Command currentCommand() const;
 
 private:
     enum State {
         INIT,
-        FLASH_ON,
-        FLASH_OFF,
-        OBSERVE,
+        SPIN,          // The signature dance
+        OBSERVE,       // Observe and confirm
         FINISHED
     };
 
@@ -41,11 +40,21 @@ private:
     int my_id_;
     bool done_;
 
-    // Flash pattern parameters
-    double flash_on_time_;
-    double flash_off_time_;
-    double observe_time_;
+    // Dance parameters
+    double spin_time_;        // Time for full 360° spin
+    double observe_time_;     // Time to observe after spin
 
     // Internal tracking
     std::vector<RobotTrack> tracks_;
+    
+    // Movement tracking for ID detection
+    struct RobotSnapshot {
+        double x, y;
+        double first_seen;
+        double total_movement;  // Accumulated distance traveled
+        int sample_count;
+    };
+    
+    std::map<int, RobotSnapshot> robot_snapshots_;  // Track ID -> snapshot
+    bool snapshots_initialized_;
 };

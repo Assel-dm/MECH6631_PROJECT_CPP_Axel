@@ -8,10 +8,10 @@ IDDance::IDDance()
     state_start_time_ = 0.0;
     my_id_ = -1;
     done_ = false;
+    snapshots_initialized_ = false;
 
-    flash_on_time_ = 0.35;   // seconds
-    flash_off_time_ = 0.35;
-    observe_time_ = 2.0;     // observe others
+    spin_time_ = 4.7;        // Time for full 360° spin
+    observe_time_ = 1.0;     // Shorter observe time - we already know who danced
 }
 
 Command IDDance::currentCommand() const
@@ -20,25 +20,25 @@ Command IDDance::currentCommand() const
 
     switch (state_)
     {
-    case FLASH_ON:
-        cmd.left = 0.0;
-        cmd.right = 0.0;
-        cmd.laser = true;
-        break;
-
-    case FLASH_OFF:
-        cmd.left = 0.0;
-        cmd.right = 0.0;
+    case SPIN:
+        // The signature dance: 360° spin
+        cmd.left = -0.8;
+        cmd.right = -0.8;
         cmd.laser = false;
         break;
 
     case OBSERVE:
+        // Stationary while observing
         cmd.left = 0.0;
         cmd.right = 0.0;
         cmd.laser = false;
         break;
 
     default:
+        // INIT and FINISHED states
+        cmd.left = 0.0;
+        cmd.right = 0.0;
+        cmd.laser = false;
         break;
     }
 
@@ -78,66 +78,114 @@ int IDDance::run(
 
     case INIT:
         state_start_time_ = now;
-        state_ = FLASH_ON;
+        state_ = SPIN;
+        snapshots_initialized_ = false;
+        robot_snapshots_.clear();
+        std::cout << "Starting ID dance - will spin 360 degrees" << std::endl;
         break;
 
-    case FLASH_ON:
-        if (now - state_start_time_ > flash_on_time_) {
-            state_start_time_ = now;
-            state_ = FLASH_OFF;
+    case SPIN:
+    {
+        // Initialize snapshots on first frame of spin
+        if (!snapshots_initialized_ && !tracks_.empty()) {
+            for (const auto& t : tracks_) {
+                RobotSnapshot snap;
+                snap.x = t.x;
+                snap.y = t.y;
+                snap.first_seen = now;
+                snap.total_movement = 0.0;
+                snap.sample_count = 0;
+                robot_snapshots_[t.id] = snap;
+                
+                std::cout << "  Tracking robot " << t.id 
+                         << " at (" << t.x << ", " << t.y << ")" << std::endl;
+            }
+            snapshots_initialized_ = true;
         }
-        break;
 
-    case FLASH_OFF:
-        if (now - state_start_time_ > flash_off_time_) {
+        // Track movement during spin
+        if (snapshots_initialized_) {
+            for (const auto& t : tracks_) {
+                auto it = robot_snapshots_.find(t.id);
+                if (it != robot_snapshots_.end()) {
+                    // Calculate movement since last frame
+                    double dx = t.x - it->second.x;
+                    double dy = t.y - it->second.y;
+                    double dist = std::hypot(dx, dy);
+                    
+                    // Accumulate total movement
+                    it->second.total_movement += dist;
+                    it->second.sample_count++;
+                    
+                    // Update position for next frame
+                    it->second.x = t.x;
+                    it->second.y = t.y;
+                }
+            }
+        }
+
+        // Check if spin complete
+        if (now - state_start_time_ > spin_time_) {
             state_start_time_ = now;
             state_ = OBSERVE;
+            std::cout << "\nSpin complete! Analyzing movement..." << std::endl;
+            
+            // Debug: Print movement statistics
+            for (const auto& pair : robot_snapshots_) {
+                std::cout << "  Robot " << pair.first 
+                         << ": total_movement=" << pair.second.total_movement 
+                         << " px over " << pair.second.sample_count << " samples" 
+                         << std::endl;
+            }
         }
         break;
+    }
 
     case OBSERVE:
         if (now - state_start_time_ > observe_time_) {
 
-            // Determine which robot flashed
-            // The robot whose FRONT marker disappeared during FLASH_OFF
-            // and reappeared during FLASH_ON is "me".
-
-            // Count detections in each phase
-            int count_on = 0;
-            int count_off = 0;
-
-            for (auto& t : tracks_) {
-                if (t.last_seen > state_start_time_ - observe_time_) {
-                    // Rough heuristic: if robot was missing during OFF phase
-                    // but present during ON phase, it's me.
-                    if (t.last_seen > state_start_time_ - flash_on_time_)
-                        count_on++;
-                    else
-                        count_off++;
+            // Identify robot with MAXIMUM movement as "me" (the dancer)
+            if (!robot_snapshots_.empty()) {
+                int best_id = -1;
+                double max_movement = -1.0;
+                
+                for (const auto& pair : robot_snapshots_) {
+                    // Only consider robots with enough samples
+                    if (pair.second.sample_count > 10) {
+                        if (pair.second.total_movement > max_movement) {
+                            max_movement = pair.second.total_movement;
+                            best_id = pair.first;
+                        }
+                    }
                 }
-            }
-
-            // Simple rule: if only one robot "blinked", that's me.
-            if (count_on == 1 && count_off == 0) {
-                // Assign ID based on track index
+                
+                if (best_id >= 0) {
+                    my_id_ = best_id;
+                    std::cout << "\n✅ Identified self as robot ID: " << my_id_ 
+                             << " (moved " << max_movement << " pixels)" << std::endl;
+                } else {
+                    // Fallback: use first tracked robot
+                    my_id_ = robot_snapshots_.begin()->first;
+                    std::cout << "\n⚠️ Insufficient samples, using first robot ID: " 
+                             << my_id_ << std::endl;
+                }
+            } else {
+                // No snapshots - fallback to current tracks
                 if (!tracks_.empty()) {
                     my_id_ = tracks_[0].id;
-                }
-            }
-            else {
-                // Fallback: choose robot closest to center
-                double best = 1e9;
-                for (auto& t : tracks_) {
-                    double d = std::hypot(t.x - 320.0, t.y - 240.0);
-                    if (d < best) {
-                        best = d;
-                        my_id_ = t.id;
-                    }
+                    std::cout << "\n⚠️ No movement data, using first track ID: " 
+                             << my_id_ << std::endl;
+                } else {
+                    my_id_ = 0;
+                    std::cout << "\n⚠️ No tracks detected, assigning default ID: 0" 
+                             << std::endl;
                 }
             }
 
             done_ = true;
             state_ = FINISHED;
+            
+            return my_id_;
         }
         break;
 
@@ -145,5 +193,5 @@ int IDDance::run(
         return my_id_;
     }
 
-    return -1;
+    return my_id_;
 }

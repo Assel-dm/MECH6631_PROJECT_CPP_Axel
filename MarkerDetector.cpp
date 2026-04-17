@@ -18,12 +18,12 @@ MarkerDetector::MarkerDetector()
     blue_range.s_min = 0.60; blue_range.v_min = 40;
 
     // red as single primary range (also provide wrap-around via blue/red_ranges)
-    red_range.h_lo = 0.0;    red_range.h_hi = 10.0;
-    red_range.s_min = 0.45;  red_range.v_min = 80;
+    red_range.h_lo = 0.0;    red_range.h_hi = 15.0;
+    red_range.s_min = 0.35;  red_range.v_min = 60;
 
     // populate vector ranges (useful for wrap-around red)
     blue_ranges = { blue_range };
-    red_ranges = { {0.0, 10.0, red_range.s_min, red_range.v_min}, {340.0, 360.0, red_range.s_min, red_range.v_min} };
+    red_ranges = { {0.0, 10.0, red_range.s_min, red_range.v_min}, {335.0, 360.0, red_range.s_min, red_range.v_min} };
 
     // morphology defaults (already initialized in header, repeat here for clarity)
     morph_iters_open = 1;

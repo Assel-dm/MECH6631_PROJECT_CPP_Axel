@@ -148,11 +148,14 @@
     <ClCompile Include="Offense.cpp" />
     <ClCompile Include="Overlay.cpp" />
     <ClCompile Include="program.cpp" />
+    <ClCompile Include="program_detector_test.cpp" />
     <ClCompile Include="robot.cpp" />
+    <ClCompile Include="shared_memory.cpp" />
     <ClCompile Include="StrategyEngine.cpp" />
     <ClCompile Include="timer.cpp" />
     <ClCompile Include="Tracking.cpp" />
     <ClCompile Include="vision.cpp" />
+    <ClCompile Include="vision_simulation.cpp" />
     <ClCompile Include="Waypoint.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -168,11 +171,13 @@
     <ClInclude Include="Offense.h" />
     <ClInclude Include="Overlay.h" />
     <ClInclude Include="robot.h" />
+    <ClInclude Include="shared_memory.h" />
     <ClInclude Include="StrategyEngine.h" />
     <ClInclude Include="timer.h" />
     <ClInclude Include="Tracking.h" />
     <ClInclude Include="Types.h" />
     <ClInclude Include="vision.h" />
+    <ClInclude Include="vision_simulation.h" />
     <ClInclude Include="Waypoint.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
