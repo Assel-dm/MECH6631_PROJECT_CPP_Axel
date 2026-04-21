@@ -1,4 +1,3 @@
-
 // mobile robot simulation class
 
 #include <cstdio>
@@ -57,7 +56,6 @@ robot::robot(double x0, double y0, double theta0, double vmax)
 	
 	// calculate the gripper position / output
 	calculate_outputs();
-	
 }
 
 
@@ -102,7 +100,7 @@ void robot::sim_step(double dt)
 	
 	///////////////////////////////////////////////////////////
 
-	// use Euler's method to calculate x(t+dt)
+	// integrate the state equations
 	for(i=1;i<=N;i++) x[i] = x[i] + xd[i]*dt;
 
 	t = t + dt; // increment time
@@ -111,7 +109,6 @@ void robot::sim_step(double dt)
 	
 	// calculate the gripper position / output
 	calculate_outputs();
-
 }
 
 
@@ -153,7 +150,6 @@ void robot::set_inputs(int pw_l, int pw_r, int pw_laser, int laser)
 	
 	alpha_ref = ( (double)pw_laser - pw_0 ) / pw_range; // -1 to 1 range
 	alpha_ref *= alpha_max;
-	
 }
 
 
@@ -173,6 +169,4 @@ void robot::calculate_outputs()
 	// calculate robot center of rotation in global coord (pixels)
 	xa = Ax*cos(x[1]) - Ay*sin(x[1]);
 	ya = Ax*sin(x[1]) + Ay*cos(x[1]);
-	
 }
-	

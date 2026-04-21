@@ -1,4 +1,3 @@
-
 #include <cstdio>
 #include <iostream>
 #include <fstream>
@@ -210,8 +209,6 @@ int set_inputs(int pw_l, int pw_r, int pw_laser, int laser,
 		S1->P[2]->v_max = opponent_max_speed;
 	}
 	
-	// note the opponent input will be set automatically later
-	
 	return 0;
 }
 
@@ -240,7 +237,7 @@ int set_opponent_inputs(int pw_l, int pw_r, int pw_laser, int laser,
 // 1. precompute -- in activate to save time
 // eg image rotations, etc.
 
-// 2. draw laser gun turrent and laser blast
+ // 2. draw laser gun turrent and laser blast
 // precomputed laser blasts at different angles 
 // use bmp and rotate for lasers -- how to shorten ?
 // -- just draw multiple rgb points ?
@@ -368,13 +365,13 @@ int acquire_image_sim(image &rgb)
 		
 	}
 	
-	// construct image from simulation results /////////
-	
+	// construct image from simulation results /////////	
+    
 	// copy background into result
 	copy(rgb_background,rgb);
 
-	// add obstacles to image /////////////////
-	
+	// add obstacles to image /////////////////	
+    
 	// obstacle image center point
 	ic = rgb_obstacle.width / 2;
 	jc = rgb_obstacle.height / 2;	
@@ -448,7 +445,7 @@ int acquire_image_sim(image &rgb)
 	// place robot at point (i,j)
 	append(rgb,rgb_robot_r,i,j);
 
-	// for testing /////////////
+	// for testing /////////////	
 /*
 	save_rgb_image("output7.bmp",rgb);
 
@@ -457,7 +454,7 @@ int acquire_image_sim(image &rgb)
 	exit(0);
 */	
 
-	// draw laser when fired /////////////////////////
+	// draw laser when fired /////////////////////////	
 
 	// check if laser was fired (laser went from 0 to 1)
 	// -- ie rising edge on laser
@@ -603,6 +600,7 @@ int rotate(image &a, image &b, image &c, double theta, int ig, int jg)
 			////////////////////////////////////////////////
 */			
 
+
 			// bilinear interpolation ///////////////////////
 
 			// set neighborhood pointers to interpolation points
@@ -630,8 +628,8 @@ int rotate(image &a, image &b, image &c, double theta, int ig, int jg)
 			// TODO: combine rotate with append functions
 			// for efficiency and also subpixel resolution
 			// with bilinear interpolation ?
-			// what happens if ig, jg is subpixel ?
-			
+
+
 			// check for background pixel out of range
 			// and use nearest background pixel
 			if( i + ig < 0 ) ig = -i;
@@ -664,14 +662,7 @@ int rotate(image &a, image &b, image &c, double theta, int ig, int jg)
 				flag = 1;			
 			}			
 
-/*			
-			if( flag ) {
-				p1 = pc + 3*( (j + jg) * width_c + i + ig + 1);	
-				*p1 = 0;
-				*(p1+1) = 255;
-				*(p1+2) = 0;			
-			}
-*/			
+
 			/////////////////////////////////////////////////////
 			
 			// find RGB for point a, b using linear interpolation, eg
@@ -694,7 +685,7 @@ int rotate(image &a, image &b, image &c, double theta, int ig, int jg)
 			// interpolate from point a to point b
 			// p3 Rb p4
 			// p1 Ra p2
-			
+	
 			R = Ra + (Rb - Ra)*(jp - j1);
 			G = Ga + (Gb - Ga)*(jp - j1);
 			B = Ba + (Bb - Ba)*(jp - j1);
@@ -710,6 +701,7 @@ int rotate(image &a, image &b, image &c, double theta, int ig, int jg)
 			} // end if sum > 0
 			
 			} // end if in range
+			
 			
 			// move to next pixel in output image
 			pb += 3;
@@ -761,6 +753,7 @@ int append(image &a, image &b, int ip, int jp)
 				}
 			
 			} // end if in range
+			
 			
 			// move to next pixel
 			pa += 3;
@@ -980,7 +973,7 @@ int draw_laser(robot *P, image &rgb)
 		if( i > rgb.width-3 ) break;
 		if( j < 3 ) break;
 		if( j > rgb.height-3 ) break;	
-		
+			
 		draw_point_rgb_laser(rgb,i,j,R,G,B);
 		
 	}

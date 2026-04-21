@@ -1,57 +1,179 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <ItemGroup>
-    <ClCompile Include="AStar.cpp" />
-    <ClCompile Include="Defense.cpp" />
-    <ClCompile Include="Fuzzy.cpp" />
-    <ClCompile Include="IDDance.cpp" />
-    <ClCompile Include="MarkerDetector.cpp" />
-    <ClCompile Include="ObstaclePipeline.cpp" />
-    <ClCompile Include="Obstacles.cpp" />
-    <ClCompile Include="OccupancyGrid.cpp" />
-    <ClCompile Include="Offense.cpp" />
-    <ClCompile Include="Overlay.cpp" />
-    <ClCompile Include="robot.cpp" />
-    <ClCompile Include="StrategyEngine.cpp" />
-    <ClCompile Include="timer.cpp" />
-    <ClCompile Include="Tracking.cpp" />
-    <ClCompile Include="vision.cpp" />
-    <ClCompile Include="Waypoint.cpp" />
-    <ClCompile Include="program_detector_test.cpp">
-      <Filter>test_programs</Filter>
-    </ClCompile>
-    <ClCompile Include="program.cpp" />
-    <ClCompile Include="shared_memory.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="AStar.h" />
-    <ClInclude Include="Defense.h" />
-    <ClInclude Include="Fuzzy.h" />
-    <ClInclude Include="IDDance.h" />
-    <ClInclude Include="image_transfer.h" />
-    <ClInclude Include="MarkerDetector.h" />
-    <ClInclude Include="ObstaclePipeline.h" />
-    <ClInclude Include="Obstacles.h" />
-    <ClInclude Include="OccupancyGrid.h" />
-    <ClInclude Include="Offense.h" />
-    <ClInclude Include="Overlay.h" />
-    <ClInclude Include="robot.h" />
-    <ClInclude Include="StrategyEngine.h" />
-    <ClInclude Include="timer.h" />
-    <ClInclude Include="Tracking.h" />
-    <ClInclude Include="Types.h" />
-    <ClInclude Include="vision.h" />
-    <ClInclude Include="Waypoint.h" />
-    <ClInclude Include="shared_memory.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Library Include="atlsnd.lib" />
-    <Library Include="image_transfer.lib" />
-    <Library Include="strmbasd.lib" />
-  </ItemGroup>
-  <ItemGroup>
-    <Filter Include="test_programs">
-      <UniqueIdentifier>{9188a605-3c7b-400b-842b-e6e8274ddcfe}</UniqueIdentifier>
-    </Filter>
-  </ItemGroup>
+	<ItemGroup>
+		<Filter Include="Simulation Core">
+			<UniqueIdentifier>{a1b2c3d4-0001-0001-0001-000000000001}</UniqueIdentifier>
+		</Filter>
+		<Filter Include="Vision &amp; Detection">
+			<UniqueIdentifier>{a1b2c3d4-0002-0002-0002-000000000002}</UniqueIdentifier>
+		</Filter>
+		<Filter Include="Strategy">
+			<UniqueIdentifier>{a1b2c3d4-0003-0003-0003-000000000003}</UniqueIdentifier>
+		</Filter>
+		<Filter Include="Pathfinding">
+			<UniqueIdentifier>{a1b2c3d4-0004-0004-0004-000000000004}</UniqueIdentifier>
+		</Filter>
+		<Filter Include="Control">
+			<UniqueIdentifier>{a1b2c3d4-0005-0005-0005-000000000005}</UniqueIdentifier>
+		</Filter>
+		<Filter Include="Debug &amp; Visualization">
+			<UniqueIdentifier>{a1b2c3d4-0006-0006-0006-000000000006}</UniqueIdentifier>
+		</Filter>
+		<Filter Include="Arena &amp; Setup">
+			<UniqueIdentifier>{a1b2c3d4-0007-0007-0007-000000000007}</UniqueIdentifier>
+		</Filter>
+		<Filter Include="Test Programs">
+			<UniqueIdentifier>{9188a605-3c7b-400b-842b-e6e8274ddcfe}</UniqueIdentifier>
+		</Filter>
+		<Filter Include="Shared Types">
+			<UniqueIdentifier>{a1b2c3d4-0009-0009-0009-000000000009}</UniqueIdentifier>
+		</Filter>
+	</ItemGroup>
+	<ItemGroup>
+		<ClCompile Include="vision.cpp">
+			<Filter>Simulation Core</Filter>
+		</ClCompile>
+		<ClCompile Include="vision_simulation.cpp">
+			<Filter>Simulation Core</Filter>
+		</ClCompile>
+		<ClCompile Include="robot.cpp">
+			<Filter>Simulation Core</Filter>
+		</ClCompile>
+		<ClCompile Include="shared_memory.cpp">
+			<Filter>Simulation Core</Filter>
+		</ClCompile>
+		<ClCompile Include="timer.cpp">
+			<Filter>Simulation Core</Filter>
+		</ClCompile>
+		<ClCompile Include="MarkerDetector.cpp">
+			<Filter>Vision &amp; Detection</Filter>
+		</ClCompile>
+		<ClCompile Include="Tracking.cpp">
+			<Filter>Vision &amp; Detection</Filter>
+		</ClCompile>
+		<ClCompile Include="IDDance.cpp">
+			<Filter>Vision &amp; Detection</Filter>
+		</ClCompile>
+		<ClCompile Include="Offense.cpp">
+			<Filter>Strategy</Filter>
+		</ClCompile>
+		<ClCompile Include="Defense.cpp">
+			<Filter>Strategy</Filter>
+		</ClCompile>
+		<ClCompile Include="StrategyEngine.cpp">
+			<Filter>Strategy</Filter>
+		</ClCompile>
+		<ClCompile Include="AStar.cpp">
+			<Filter>Pathfinding</Filter>
+		</ClCompile>
+		<ClCompile Include="OccupancyGrid.cpp">
+			<Filter>Pathfinding</Filter>
+		</ClCompile>
+		<ClCompile Include="ObstaclePipeline.cpp">
+			<Filter>Pathfinding</Filter>
+		</ClCompile>
+		<ClCompile Include="Obstacles.cpp">
+			<Filter>Pathfinding</Filter>
+		</ClCompile>
+		<ClCompile Include="Waypoint.cpp">
+			<Filter>Control</Filter>
+		</ClCompile>
+		<ClCompile Include="Fuzzy.cpp">
+			<Filter>Control</Filter>
+		</ClCompile>
+		<ClCompile Include="DebugVisualizer.cpp">
+			<Filter>Debug &amp; Visualization</Filter>
+		</ClCompile>
+		<ClCompile Include="Overlay.cpp">
+			<Filter>Debug &amp; Visualization</Filter>
+		</ClCompile>
+		<ClCompile Include="ArenaSetup.cpp">
+			<Filter>Arena &amp; Setup</Filter>
+		</ClCompile>
+		<ClCompile Include="program.cpp">
+			<Filter>Arena &amp; Setup</Filter>
+		</ClCompile>
+		<ClCompile Include="program_detector_test.cpp">
+			<Filter>Test Programs</Filter>
+		</ClCompile>
+		<ClCompile Include="program_IDDance_test.cpp">
+			<Filter>Test Programs</Filter>
+		</ClCompile>
+	</ItemGroup>
+	<ItemGroup>
+		<ClInclude Include="vision.h">
+			<Filter>Simulation Core</Filter>
+		</ClInclude>
+		<ClInclude Include="vision_simulation.h">
+			<Filter>Simulation Core</Filter>
+		</ClInclude>
+		<ClInclude Include="robot.h">
+			<Filter>Simulation Core</Filter>
+		</ClInclude>
+		<ClInclude Include="shared_memory.h">
+			<Filter>Simulation Core</Filter>
+		</ClInclude>
+		<ClInclude Include="image_transfer.h">
+			<Filter>Simulation Core</Filter>
+		</ClInclude>
+		<ClInclude Include="MarkerDetector.h">
+			<Filter>Vision &amp; Detection</Filter>
+		</ClInclude>
+		<ClInclude Include="Tracking.h">
+			<Filter>Vision &amp; Detection</Filter>
+		</ClInclude>
+		<ClInclude Include="IDDance.h">
+			<Filter>Vision &amp; Detection</Filter>
+		</ClInclude>
+		<ClInclude Include="Offense.h">
+			<Filter>Strategy</Filter>
+		</ClInclude>
+		<ClInclude Include="Defense.h">
+			<Filter>Strategy</Filter>
+		</ClInclude>
+		<ClInclude Include="StrategyEngine.h">
+			<Filter>Strategy</Filter>
+		</ClInclude>
+		<ClInclude Include="OpponentBehaviour.h">
+			<Filter>Strategy</Filter>
+		</ClInclude>
+		<ClInclude Include="AStar.h">
+			<Filter>Pathfinding</Filter>
+		</ClInclude>
+		<ClInclude Include="OccupancyGrid.h">
+			<Filter>Pathfinding</Filter>
+		</ClInclude>
+		<ClInclude Include="ObstaclePipeline.h">
+			<Filter>Pathfinding</Filter>
+		</ClInclude>
+		<ClInclude Include="Obstacles.h">
+			<Filter>Pathfinding</Filter>
+		</ClInclude>
+		<ClInclude Include="Waypoint.h">
+			<Filter>Control</Filter>
+		</ClInclude>
+		<ClInclude Include="Fuzzy.h">
+			<Filter>Control</Filter>
+		</ClInclude>
+		<ClInclude Include="DebugVisualizer.h">
+			<Filter>Debug &amp; Visualization</Filter>
+		</ClInclude>
+		<ClInclude Include="Overlay.h">
+			<Filter>Debug &amp; Visualization</Filter>
+		</ClInclude>
+		<ClInclude Include="ArenaSetup.h">
+			<Filter>Arena &amp; Setup</Filter>
+		</ClInclude>
+		<ClInclude Include="Types.h">
+			<Filter>Shared Types</Filter>
+		</ClInclude>
+		<ClInclude Include="timer.h">
+			<Filter>Simulation Core</Filter>
+		</ClInclude>
+	</ItemGroup>
+	<ItemGroup>
+		<Library Include="atlsnd.lib" />
+		<Library Include="image_transfer.lib" />
+		<Library Include="strmbasd.lib" />
+	</ItemGroup>
 </Project>

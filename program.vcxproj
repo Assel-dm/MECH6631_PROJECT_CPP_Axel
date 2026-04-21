@@ -137,7 +137,9 @@
     <Library Include="strmbasd.lib" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="ArenaSetup.cpp" />
     <ClCompile Include="AStar.cpp" />
+    <ClCompile Include="DebugVisualizer.cpp" />
     <ClCompile Include="Defense.cpp" />
     <ClCompile Include="Fuzzy.cpp" />
     <ClCompile Include="IDDance.cpp" />
@@ -147,11 +149,12 @@
     <ClCompile Include="OccupancyGrid.cpp" />
     <ClCompile Include="Offense.cpp" />
     <ClCompile Include="Overlay.cpp" />
-    <ClCompile Include="program.cpp" />
+    <ClCompile Include="program_IDDance_test.cpp" />
     <ClCompile Include="program_detector_test.cpp" />
     <ClCompile Include="robot.cpp" />
     <ClCompile Include="shared_memory.cpp" />
     <ClCompile Include="StrategyEngine.cpp" />
+    <ClCompile Include="program.cpp" />
     <ClCompile Include="timer.cpp" />
     <ClCompile Include="Tracking.cpp" />
     <ClCompile Include="vision.cpp" />
@@ -159,7 +162,9 @@
     <ClCompile Include="Waypoint.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="ArenaSetup.h" />
     <ClInclude Include="AStar.h" />
+    <ClInclude Include="DebugVisualizer.h" />
     <ClInclude Include="Defense.h" />
     <ClInclude Include="Fuzzy.h" />
     <ClInclude Include="IDDance.h" />
@@ -169,6 +174,7 @@
     <ClInclude Include="Obstacles.h" />
     <ClInclude Include="OccupancyGrid.h" />
     <ClInclude Include="Offense.h" />
+    <ClInclude Include="OpponentBehaviour.h" />
     <ClInclude Include="Overlay.h" />
     <ClInclude Include="robot.h" />
     <ClInclude Include="shared_memory.h" />

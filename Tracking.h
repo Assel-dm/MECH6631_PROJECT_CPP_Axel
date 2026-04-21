@@ -20,6 +20,14 @@ public:
         int max_misses);
 };
 
-// Median nearest-neighbor separation estimator (moved from MarkerPairing)
 std::optional<double> estimate_marker_sep_px(const std::vector<Blob>& front_blobs,
                                              const std::vector<Blob>& rear_blobs);
+
+// Find a tracked robot by ID — returns false if not found
+inline bool getTrackedRobotState(const std::vector<RobotTrack>& tracks, int id,
+                                 double& x, double& y, double& theta) {
+    for (const auto& t : tracks) {
+        if (t.id == id) { x = t.x; y = t.y; theta = t.theta; return true; }
+    }
+    return false;
+}

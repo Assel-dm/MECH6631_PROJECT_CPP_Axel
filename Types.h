@@ -59,3 +59,12 @@ inline double angle_wrap(double a) {
 inline double dist2d(double x1, double y1, double x2, double y2) {
     return std::hypot(x1 - x2, y1 - y2);
 }
+
+// --- Robot control helpers ---
+inline int vel_to_pw(double vel) {
+    constexpr int pw_center = 1500;
+    constexpr int pw_range  = 500;
+    if (vel < -1.0) vel = -1.0;
+    if (vel >  1.0) vel =  1.0;
+    return pw_center + static_cast<int>(vel * pw_range);
+}

@@ -1,4 +1,3 @@
-
 #pragma once
 // mobile robot simulation class
 
@@ -54,5 +53,32 @@ class robot {
 
 	void calculate_outputs();
 	
+	// ============ COLLISION DETECTION METHODS ============
+	void setCollisionData(int N_obs, double* x_obs, double* y_obs, double* size_obs);
+	void setCollisionEnabled(bool enabled);
+	void setCollisionBox(double width, double length);
+	bool checkCollision(double test_x, double test_y, double test_theta) const;
+	
+	// NEW: Collision recovery
+	bool isStuck() const;                  // Check if robot is stuck
+	void resetCollisionCounter();          // Reset stuck counter
+	int getCollisionCount() const;         // Get collision count
+	// =====================================================
+	
+	private:
+	// ============ COLLISION DETECTION MEMBERS ============
+	int collision_N_obs;
+	double* collision_x_obs;
+	double* collision_y_obs;
+	double* collision_size_obs;
+	bool collision_enabled;
+	double collision_robot_width;
+	double collision_robot_length;
+	
+	// NEW: Collision recovery members
+	int collision_count;              // Count consecutive collisions
+	double last_collision_time;       // Time of last collision
+	static const int STUCK_THRESHOLD = 50;  // Collisions before "stuck"
+	// =====================================================
 };
 

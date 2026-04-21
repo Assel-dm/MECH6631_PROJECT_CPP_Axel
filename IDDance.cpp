@@ -2,6 +2,11 @@
 #include <cmath>
 #include <iostream>
 
+// Helper: wrap angle to [-π, π]
+static double wrap_angle(double a) {
+    return fmod(a + M_PI, 2.0 * M_PI) - M_PI;
+}
+
 IDDance::IDDance()
 {
     state_ = INIT;
@@ -10,8 +15,12 @@ IDDance::IDDance()
     done_ = false;
     snapshots_initialized_ = false;
 
-    spin_time_ = 4.7;        // Time for full 360° spin
-    observe_time_ = 1.0;     // Shorter observe time - we already know who danced
+	spin_time_ = 4.7; //This should be properly calibrated based on physical testing to achieve a clear angular velocity signature
+    observe_time_ = 1.0;
+
+    // Expected angular velocity during spin (both wheels -0.8 → spinning in place)
+    // One full revolution in spin_time_ seconds
+    commanded_omega_ = (2.0 * M_PI) / spin_time_;   // ~1.337 rad/s
 }
 
 Command IDDance::currentCommand() const
@@ -21,22 +30,17 @@ Command IDDance::currentCommand() const
     switch (state_)
     {
     case SPIN:
-        // The signature dance: 360° spin
-        cmd.left = -0.8;
+        cmd.left  = -0.8;
         cmd.right = -0.8;
         cmd.laser = false;
         break;
-
     case OBSERVE:
-        // Stationary while observing
-        cmd.left = 0.0;
+        cmd.left  = 0.0;
         cmd.right = 0.0;
         cmd.laser = false;
         break;
-
     default:
-        // INIT and FINISHED states
-        cmd.left = 0.0;
+        cmd.left  = 0.0;
         cmd.right = 0.0;
         cmd.laser = false;
         break;
@@ -53,26 +57,13 @@ int IDDance::run(
 {
     if (done_) return my_id_;
 
-    // Detect markers
     std::vector<Blob> front, rear;
     detector.detect_markers(rgb, front, rear);
 
-    // Pair into robot detections
     std::optional<double> expected_sep;
     auto dets = tracker.pairMarkers(front, rear, expected_sep, 0.55, 1200.0);
 
-    // Update tracks
-    tracks_ = tracker.updateTracks(
-        tracks_,
-        dets,
-        now,
-        80.0,
-        10
-    );
-
-    // -------------------------
-    // State machine
-    // -------------------------
+    tracks_ = tracker.updateTracks(tracks_, dets, now, 80.0, 10);
 
     switch (state_) {
 
@@ -82,60 +73,79 @@ int IDDance::run(
         snapshots_initialized_ = false;
         robot_snapshots_.clear();
         std::cout << "Starting ID dance - will spin 360 degrees" << std::endl;
+        std::cout << "  Expected omega = " << commanded_omega_ << " rad/s" << std::endl;
         break;
 
     case SPIN:
     {
-        // Initialize snapshots on first frame of spin
+        // Initialise snapshots on first frame
         if (!snapshots_initialized_ && !tracks_.empty()) {
             for (const auto& t : tracks_) {
                 RobotSnapshot snap;
                 snap.x = t.x;
                 snap.y = t.y;
-                snap.first_seen = now;
+                snap.theta        = t.theta;
+                snap.first_seen   = now;
                 snap.total_movement = 0.0;
                 snap.sample_count = 0;
+                snap.prev_theta   = t.theta;
+                snap.prev_time    = now;
+                snap.total_dtheta = 0.0;
+                snap.omega_samples = 0;
+
                 robot_snapshots_[t.id] = snap;
-                
-                std::cout << "  Tracking robot " << t.id 
-                         << " at (" << t.x << ", " << t.y << ")" << std::endl;
+                std::cout << "  Tracking robot " << t.id
+                          << " at (" << t.x << ", " << t.y << ")"
+                          << " theta=" << t.theta << std::endl;
             }
             snapshots_initialized_ = true;
         }
 
-        // Track movement during spin
+        // Accumulate translational movement AND angular velocity each frame
         if (snapshots_initialized_) {
             for (const auto& t : tracks_) {
                 auto it = robot_snapshots_.find(t.id);
-                if (it != robot_snapshots_.end()) {
-                    // Calculate movement since last frame
-                    double dx = t.x - it->second.x;
-                    double dy = t.y - it->second.y;
-                    double dist = std::hypot(dx, dy);
-                    
-                    // Accumulate total movement
-                    it->second.total_movement += dist;
-                    it->second.sample_count++;
-                    
-                    // Update position for next frame
-                    it->second.x = t.x;
-                    it->second.y = t.y;
+                if (it == robot_snapshots_.end()) continue;
+
+                auto& snap = it->second;
+
+                // Translation
+                double dx   = t.x - snap.x;
+                double dy   = t.y - snap.y;
+                snap.total_movement += std::hypot(dx, dy);
+                snap.sample_count++;
+                snap.x = t.x;
+                snap.y = t.y;
+
+                // Angular velocity
+                double dt = now - snap.prev_time;
+                if (dt > 1e-4) {
+                    double dtheta = wrap_angle(t.theta - snap.prev_theta);
+                    double omega  = dtheta / dt;           // rad/s (signed)
+                    snap.total_dtheta  += std::fabs(omega); // accumulate magnitude
+                    snap.omega_samples++;
                 }
+                snap.prev_theta = t.theta;
+                snap.prev_time  = now;
+                snap.theta      = t.theta;
             }
         }
 
-        // Check if spin complete
         if (now - state_start_time_ > spin_time_) {
             state_start_time_ = now;
             state_ = OBSERVE;
-            std::cout << "\nSpin complete! Analyzing movement..." << std::endl;
-            
-            // Debug: Print movement statistics
+            std::cout << "\nSpin complete! Analyzing angular velocity..." << std::endl;
+
             for (const auto& pair : robot_snapshots_) {
-                std::cout << "  Robot " << pair.first 
-                         << ": total_movement=" << pair.second.total_movement 
-                         << " px over " << pair.second.sample_count << " samples" 
-                         << std::endl;
+                double avg_omega = (pair.second.omega_samples > 0)
+                    ? pair.second.total_dtheta / pair.second.omega_samples
+                    : 0.0;
+                std::cout << "  Robot " << pair.first
+                          << ": avg_omega=" << avg_omega << " rad/s"
+                          << " (target=" << commanded_omega_ << ")"
+                          << " movement=" << pair.second.total_movement << " px"
+                          << " over " << pair.second.sample_count << " samples"
+                          << std::endl;
             }
         }
         break;
@@ -144,47 +154,50 @@ int IDDance::run(
     case OBSERVE:
         if (now - state_start_time_ > observe_time_) {
 
-            // Identify robot with MAXIMUM movement as "me" (the dancer)
             if (!robot_snapshots_.empty()) {
-                int best_id = -1;
-                double max_movement = -1.0;
-                
+                int    best_id    = -1;
+                double best_score = 1e9;   // Lower = closer to commanded_omega_
+
                 for (const auto& pair : robot_snapshots_) {
-                    // Only consider robots with enough samples
-                    if (pair.second.sample_count > 10) {
-                        if (pair.second.total_movement > max_movement) {
-                            max_movement = pair.second.total_movement;
-                            best_id = pair.first;
-                        }
+                    if (pair.second.omega_samples < 10) continue;
+
+                    double avg_omega = pair.second.total_dtheta / pair.second.omega_samples;
+                    double score     = std::fabs(avg_omega - commanded_omega_);
+
+                    if (score < best_score) {
+                        best_score = score;
+                        best_id    = pair.first;
                     }
                 }
-                
+
                 if (best_id >= 0) {
                     my_id_ = best_id;
-                    std::cout << "\n✅ Identified self as robot ID: " << my_id_ 
-                             << " (moved " << max_movement << " pixels)" << std::endl;
+                    double avg_omega = robot_snapshots_[best_id].total_dtheta
+                                     / robot_snapshots_[best_id].omega_samples;
+                    std::cout << "\n✅ Identified self as robot ID: " << my_id_
+                              << " (omega=" << avg_omega << " rad/s"
+                              << ", error=" << std::fabs(avg_omega - commanded_omega_) << " rad/s)"
+                              << std::endl;
                 } else {
-                    // Fallback: use first tracked robot
-                    my_id_ = robot_snapshots_.begin()->first;
-                    std::cout << "\n⚠️ Insufficient samples, using first robot ID: " 
-                             << my_id_ << std::endl;
+                    // Fallback: use movement (original method)
+                    my_id_ = -1;
+                    double max_movement = -1.0;
+                    for (const auto& pair : robot_snapshots_) {
+                        if (pair.second.total_movement > max_movement) {
+                            max_movement = pair.second.total_movement;
+                            my_id_       = pair.first;
+                        }
+                    }
+                    std::cout << "\n⚠️ Insufficient omega samples, fell back to movement ID: "
+                              << my_id_ << std::endl;
                 }
             } else {
-                // No snapshots - fallback to current tracks
-                if (!tracks_.empty()) {
-                    my_id_ = tracks_[0].id;
-                    std::cout << "\n⚠️ No movement data, using first track ID: " 
-                             << my_id_ << std::endl;
-                } else {
-                    my_id_ = 0;
-                    std::cout << "\n⚠️ No tracks detected, assigning default ID: 0" 
-                             << std::endl;
-                }
+                my_id_ = (!tracks_.empty()) ? tracks_[0].id : 0;
+                std::cout << "\n⚠️ No snapshot data, using first track ID: " << my_id_ << std::endl;
             }
 
-            done_ = true;
+            done_  = true;
             state_ = FINISHED;
-            
             return my_id_;
         }
         break;
