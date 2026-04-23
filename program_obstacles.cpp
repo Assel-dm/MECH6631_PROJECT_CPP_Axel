@@ -17,7 +17,7 @@
 #include "ObstaclePipeline.h"
 #include "StrategyEngine.h"
 
-/* #define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
+ /*#define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
 
 int main()
 {

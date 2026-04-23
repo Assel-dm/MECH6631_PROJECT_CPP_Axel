@@ -1,6 +1,4 @@
 #pragma once
-#define NOMINMAX
-#include <windows.h>
 // image types
 // RGB_IMAGE   is 3 bytes per pixel
 // GREY_IMAGE  is 1 bytes per pixel
@@ -25,7 +23,7 @@ typedef struct {
 
 // size of shared memory block
 // 170 MB (10,000 x 5,650 pixel -- RGB image)
-const DWORD SMAX = 170000000; 
+const unsigned long int SMAX = 170000000; 
 
 // NODE_A = image transfer lib program
 // NODE_B = image_view program
@@ -47,7 +45,27 @@ int start_camera(int cam_number);
 
 ///////
 
-int view_rgb_image(image &a);
+int view_rgb_image(image &a, int mode = 0);
+
+// try the different modes below to see what gives the best performance
+// if you find the image_view.exe display is delayed or jerks
+
+// mode = 0 (default -- ie when no argument is given)
+// - view_rgb_image() waits until image_view.exe is ready for a new image
+// - this tends to sync fps of the program with fps of image_view.exe
+// resulting in a more smooth display in some situations
+// - in other situations it might be less smooth with more delays
+
+// mode = 1
+// - view_rgb_image() doesn't wait until image_view.exe is ready
+// - if it's not ready, the functions just returns -- you can try 
+// again later (eg the next iteration in a while loop)
+// - the function doesn't stop the program waiting for image_view.exe, 
+// so the performance might be better in some cases with more smooth output
+
+// mode = 2
+// - similar to mode 0 but it doesn't use Sleep when waiting, 
+// which could improve performance in some situations
 
 int save_rgb_image(char *file_name, image &a);
 
@@ -70,7 +88,12 @@ int open_video_input(char *file_name, double &t_duration, int &width, int &heigh
 
 int close_video_input();
 
-int open_video_output(char *file_name);
+int open_video_output(char *file_name, 
+	int target_data_rate_bps = 100000000);
+
+// 100000000 bps (100,000 kbps) = 12:1 compression 
+// for a 1080p, 24 fps video which should give no 
+// significant losses -- even for very challenging cases
 
 int close_video_output();
 

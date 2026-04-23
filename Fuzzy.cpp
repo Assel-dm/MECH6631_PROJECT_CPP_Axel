@@ -174,8 +174,8 @@ FuzzyDecision FuzzyLogic::defense(const TacticalFeatures& f)
     }
 
     d.speed_scale = clamp(
-        0.45 + 0.90 * enemy_close,
-        0.35, 1.35
+        0.55 + 0.80 * enemy_close,  // raised floor: was 0.45 + 0.90
+        0.55, 1.35                  // minimum raised from 0.35 → 0.55
     );
 
     d.lookahead_scale = clamp(

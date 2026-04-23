@@ -149,14 +149,16 @@
     <ClCompile Include="OccupancyGrid.cpp" />
     <ClCompile Include="Offense.cpp" />
     <ClCompile Include="Overlay.cpp" />
+    <ClCompile Include="program.cpp" />
     <ClCompile Include="program_IDDance_test.cpp" />
-    <ClCompile Include="program_detector_test.cpp" />
+    <ClCompile Include="program_obstacles.cpp" />
     <ClCompile Include="robot.cpp" />
     <ClCompile Include="shared_memory.cpp" />
     <ClCompile Include="StrategyEngine.cpp" />
-    <ClCompile Include="program.cpp" />
+    <ClCompile Include="program_sim.cpp" />
     <ClCompile Include="timer.cpp" />
     <ClCompile Include="Tracking.cpp" />
+    <ClCompile Include="update_simulation.cpp" />
     <ClCompile Include="vision.cpp" />
     <ClCompile Include="vision_simulation.cpp" />
     <ClCompile Include="Waypoint.cpp" />
@@ -182,6 +184,7 @@
     <ClInclude Include="timer.h" />
     <ClInclude Include="Tracking.h" />
     <ClInclude Include="Types.h" />
+    <ClInclude Include="update_simulation.h" />
     <ClInclude Include="vision.h" />
     <ClInclude Include="vision_simulation.h" />
     <ClInclude Include="Waypoint.h" />
