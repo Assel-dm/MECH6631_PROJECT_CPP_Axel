@@ -14,18 +14,18 @@
     <SccProjectName />
     <SccLocalPath />
     <ProjectGuid>{7E56BCE6-5C39-441D-9CAC-2739075FA2BC}</ProjectGuid>
-    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <UseOfMfc>false</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <UseOfMfc>false</UseOfMfc>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
@@ -139,10 +139,16 @@
   <ItemGroup>
     <ClCompile Include="ArenaSetup.cpp" />
     <ClCompile Include="AStar.cpp" />
+    <ClCompile Include="ColorProfiles.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">No</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="CombatGeometry.cpp" />
     <ClCompile Include="DebugVisualizer.cpp" />
     <ClCompile Include="Defense.cpp" />
     <ClCompile Include="Fuzzy.cpp" />
+    <ClCompile Include="GridUtils.cpp" />
     <ClCompile Include="IDDance.cpp" />
+    <ClCompile Include="LaserGate.cpp" />
     <ClCompile Include="MarkerDetector.cpp" />
     <ClCompile Include="ObstaclePipeline.cpp" />
     <ClCompile Include="Obstacles.cpp" />
@@ -166,11 +172,15 @@
   <ItemGroup>
     <ClInclude Include="ArenaSetup.h" />
     <ClInclude Include="AStar.h" />
+    <ClInclude Include="ColorProfiles.h" />
+    <ClInclude Include="CombatGeometry.h" />
     <ClInclude Include="DebugVisualizer.h" />
     <ClInclude Include="Defense.h" />
     <ClInclude Include="Fuzzy.h" />
+    <ClInclude Include="GridUtils.h" />
     <ClInclude Include="IDDance.h" />
     <ClInclude Include="image_transfer.h" />
+    <ClInclude Include="LaserGate.h" />
     <ClInclude Include="MarkerDetector.h" />
     <ClInclude Include="ObstaclePipeline.h" />
     <ClInclude Include="Obstacles.h" />
