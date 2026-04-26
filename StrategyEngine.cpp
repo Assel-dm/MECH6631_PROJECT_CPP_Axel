@@ -1,18 +1,40 @@
 #include "StrategyEngine.h"
 #include "ObstaclePipeline.h"
+
 #include <cmath>
 #include <iostream>
 
+using namespace ColorProfiles;
+
 StrategyEngine::StrategyEngine()
     : offense_(&planner_, &follower_, &fuzzy_),
-    defense_(&planner_, &follower_, &fuzzy_)
+      defense_(&planner_, &follower_, &fuzzy_),
+      laser_gate_(3, 8)
 {
     my_id_ = 0;
     offense_mode_ = true;
 
+    // Build default multi-profile color logic
+    color_specs_ = buildDefaultColorSpecs();
+    robot_profiles_ = buildDefaultRobotProfiles();
+    for (const auto& kv : robot_profiles_) {
+        expected_sep_px_map_[kv.first] = std::nullopt;
+    }
+
     // Grid and obstacle detection parameters
     cell_px_    = 20;
     inflate_px_ = 10;
+
+    // Marker / profile detection parameters
+    blob_min_area_ = 60;
+    blob_max_area_ = 3000;
+    min_area_ratio_ = 0.20;
+    pair_sep_tol_ = 0.55;
+    max_pair_px_ = 1200.0;
+    pair_area_ratio_tol_ = 2.6;
+    morph_open_iters_ = 1;
+    morph_close_iters_ = 2;
+    morph_repeat_ = 1;
 
     // Lab floor colour model thresholds
     kL_ = 2.5f;
@@ -20,126 +42,141 @@ StrategyEngine::StrategyEngine()
     kb_ = 2.0f;
 
     // Strategy parameters
-    lookahead_cells_  = 4;
-    v_max_            = 120.0;
-    laser_close_px_   = 140.0;
-    laser_align_deg_  = 10.0;
+    lookahead_cells_   = 4;
+    v_max_             = 120.0;
+    laser_close_px_    = 140.0;
+    laser_align_deg_   = 10.0;
+    laser_los_margin_px_ = 12.0;
 
     // Tracker parameters
     max_match_dist_px_ = 60.0;
     max_misses_        = 8;
 
-    // ── Arena boundary parameters ─────────────────────────────────────────────
-    // Virtual wall strip width added to the occupancy grid on all four sides.
-    // Start at 60px and increase if the robot still approaches the camera edge.
+    // Arena boundary parameters
     arena_margin_px_ = 60;
-
-    // Hard-stop zone: halt all motion if tracked centroid enters this border.
-    // Keep >= arena_margin_px_ so it only triggers when the path guard fails.
     arena_danger_px_ = 80;
 }
 
-// ---------------------------------------------------------------------------
-// Appends four axis-aligned Obstacle strips along the camera frame boundary.
-// Each strip is arena_margin_px_ thick and spans the full frame width/height.
-// ---------------------------------------------------------------------------
+std::vector<RobotDet> StrategyEngine::toLegacyDets(const std::vector<ProfiledRobotDet>& dets)
+{
+    std::vector<RobotDet> out;
+    out.reserve(dets.size());
+    for (const auto& d : dets) {
+        out.push_back(RobotDet{d.front, d.rear, d.x, d.y, d.theta, d.sep_px});
+    }
+    return out;
+}
+
+std::vector<RobotTrack> StrategyEngine::toLegacyTracks(const std::vector<ProfiledRobotTrack>& tracks)
+{
+    std::vector<RobotTrack> out;
+    out.reserve(tracks.size());
+    for (const auto& t : tracks) {
+        out.push_back(RobotTrack{t.id, t.x, t.y, t.theta, t.sep_px, t.last_seen, t.misses});
+    }
+    return out;
+}
+
 void StrategyEngine::addArenaBoundaries(std::vector<Obstacle>& obs, int W, int H) const
 {
     int m = arena_margin_px_;
-
-    // Helper: push one rectangle expressed as (top-left x, top-left y, w, h)
     auto push = [&](int x, int y, int w, int h) {
         Obstacle o;
-        o.x    = x;
-        o.y    = y;
-        o.w    = w;
-        o.h    = h;
-        o.cx   = x + w / 2.0;
-        o.cy   = y + h / 2.0;
+        o.x = x; o.y = y; o.w = w; o.h = h;
+        o.cx = x + w / 2.0;
+        o.cy = y + h / 2.0;
         o.area = static_cast<double>(w * h);
         obs.push_back(o);
     };
 
-    push(0,     0,     W, m);      // top
-    push(0,     H - m, W, m);      // bottom
-    push(0,     0,     m, H);      // left
-    push(W - m, 0,     m, H);      // right
+    push(0,     0,     W, m);
+    push(0,     H - m, W, m);
+    push(0,     0,     m, H);
+    push(W - m, 0,     m, H);
 }
 
-void StrategyEngine::setID(int id) {
+void StrategyEngine::setID(int id)
+{
     my_id_ = id;
 }
 
 Command StrategyEngine::update(image& rgb, double now)
 {
-    int W = rgb.width;
-    int H = rgb.height;
+    const int W = rgb.width;
+    const int H = rgb.height;
 
-    // ------------------------------------------------------------
-    // 1. Detect front (blue) and rear (red) colour markers
-    // ------------------------------------------------------------
-    std::vector<Blob> front_blobs;
-    std::vector<Blob> rear_blobs;
+    // ---------------------------------------------------------------------
+    // 1) Multi-profile detection (GR / OB) using explicit color specs
+    // ---------------------------------------------------------------------
+    std::map<std::string, std::optional<double>> sep_estimates;
+    std::vector<ProfiledRobotDet> prof_dets = detectProfileRobots(
+        rgb,
+        color_specs_,
+        robot_profiles_,
+        expected_sep_px_map_,
+        blob_min_area_,
+        blob_max_area_,
+        min_area_ratio_,
+        pair_sep_tol_,
+        max_pair_px_,
+        pair_area_ratio_tol_,
+        morph_open_iters_,
+        morph_close_iters_,
+        morph_repeat_,
+        nullptr,
+        nullptr,
+        &sep_estimates);
 
-    markerDetector_.detect_markers(rgb, front_blobs, rear_blobs);
-
-    std::vector<Blob> robot_blobs = front_blobs;
-    robot_blobs.insert(robot_blobs.end(), rear_blobs.begin(), rear_blobs.end());
-
-    // ------------------------------------------------------------
-    // 2. Pair front/rear blobs into single robot detections
-    // ------------------------------------------------------------
-    std::optional<double> expected_sep;
-    auto dets = tracker_.pairMarkers(
-        front_blobs,
-        rear_blobs,
-        expected_sep,
-        0.55,
-        1200.0
-    );
-
-    // ------------------------------------------------------------
-    // 3. Update persistent robot tracks
-    // ------------------------------------------------------------
-    tracks_ = tracker_.updateTracks(
-        tracks_,
-        dets,
-        now,
-        max_match_dist_px_,
-        max_misses_
-    );
-
-    if (tracks_.size() < 2) {
-        return { 0.0, 0.0, false };
+    for (const auto& kv : sep_estimates) {
+        if (!expected_sep_px_map_[kv.first].has_value() && kv.second.has_value()) {
+            expected_sep_px_map_[kv.first] = kv.second;
+        }
     }
 
-    // ------------------------------------------------------------
-    // 4. Compute robot mask sizes from marker separation
-    // ------------------------------------------------------------
-    double marker_sep_in   = 9.0;
-    double robot_length_in = 15.0;
-    double robot_width_in  = 11.0;
+    // ---------------------------------------------------------------------
+    // 2) Profile-aware tracking, then convert to legacy RobotTrack so the
+    //    existing fuzzy/offense/defense code can continue to run unchanged.
+    // ---------------------------------------------------------------------
+    prof_tracks_ = updateProfileTracks(
+        prof_tracks_,
+        prof_dets,
+        now,
+        max_match_dist_px_,
+        max_misses_);
+    tracks_ = toLegacyTracks(prof_tracks_);
+
+    if (tracks_.size() < 2) {
+        return {0.0, 0.0, false};
+    }
+
+    // ---------------------------------------------------------------------
+    // 3) Robot mask sizes from marker separation
+    // ---------------------------------------------------------------------
+    const double marker_sep_in   = 9.0;
+    const double robot_length_in = 15.0;
+    const double robot_width_in  = 11.0;
 
     int robot_length_px = 100;
     int robot_width_px  = 80;
 
-    if (!dets.empty()) {
+    if (!prof_dets.empty()) {
         double avg_sep_px = 0.0;
-        for (const auto& d : dets) avg_sep_px += d.sep_px;
-        avg_sep_px /= dets.size();
+        for (const auto& d : prof_dets) avg_sep_px += d.sep_px;
+        avg_sep_px /= static_cast<double>(prof_dets.size());
 
-        double px_per_in    = avg_sep_px / marker_sep_in;
-        double safety_factor = 3.5;
-        robot_length_px = (int)(robot_length_in * px_per_in * safety_factor);
-        robot_width_px  = (int)(robot_width_in  * px_per_in * safety_factor);
+        const double px_per_in = avg_sep_px / marker_sep_in;
+        const double safety_factor = 3.5;
+        robot_length_px = static_cast<int>(robot_length_in * px_per_in * safety_factor);
+        robot_width_px  = static_cast<int>(robot_width_in  * px_per_in * safety_factor);
     }
 
-    // ------------------------------------------------------------
-    // 5. Detect real obstacles and build initial occupancy grid
-    // ------------------------------------------------------------
+    // ---------------------------------------------------------------------
+    // 4) Detect obstacles and build occupancy grid, excluding robot bodies
+    // ---------------------------------------------------------------------
+    std::vector<RobotDet> legacy_dets = toLegacyDets(prof_dets);
     auto pipeline_res = process_frame_obstacles(
         rgb,
-        dets,
+        legacy_dets,
         obstacleDetector_,
         occBuilder_,
         kL_, ka_, kb_,
@@ -147,53 +184,45 @@ Command StrategyEngine::update(image& rgb, double now)
         cell_px_,
         inflate_px_,
         robot_length_px,
-        robot_width_px
-    );
+        robot_width_px);
 
     auto obstacles = pipeline_res.obstacles;
-
-    // ------------------------------------------------------------
-    // 5b. Append virtual arena boundary obstacles and rebuild grids.
-    //     This prevents A* from ever planning a path into the border
-    //     zone, so the robot stays within the camera's field of view.
-    // ------------------------------------------------------------
     addArenaBoundaries(obstacles, W, H);
 
     Grid grid        = occBuilder_.build(obstacles, W, H, cell_px_, inflate_px_);
     Grid grid_visual = occBuilder_.build(obstacles, W, H, cell_px_, 0);
 
-    // ------------------------------------------------------------
-    // 6. Determine offense or defense mode
-    // ------------------------------------------------------------
-    const RobotTrack* me    = nullptr;
+    // ---------------------------------------------------------------------
+    // 5) Determine offense or defense mode
+    // ---------------------------------------------------------------------
+    const RobotTrack* me = nullptr;
     const RobotTrack* enemy = nullptr;
 
-    for (auto& t : tracks_) {
-        if (t.id == my_id_) me = &t;
+    for (const auto& t : tracks_) {
+        if (t.id == my_id_) {
+            me = &t;
+            break;
+        }
     }
 
     if (me) {
-        // ── Hard-stop boundary guard ─────────────────────────────────────────
-        // If the robot's centroid is already inside the danger zone (e.g. after
-        // a shove or tracking lag), stop all motion immediately rather than
-        // issuing a command that could push it further out of frame.
-        double d = arena_danger_px_;
-        bool near_edge = (me->x < d) || (me->x > W - d) ||
-                         (me->y < d) || (me->y > H - d);
+        const double d = arena_danger_px_;
+        const bool near_edge = (me->x < d) || (me->x > W - d) ||
+                               (me->y < d) || (me->y > H - d);
         if (near_edge) {
             std::cout << "  [BOUNDARY GUARD] robot near edge ("
-                      << (int)me->x << "," << (int)me->y
+                      << static_cast<int>(me->x) << "," << static_cast<int>(me->y)
                       << ") — halting." << std::endl;
-            return { 0.0, 0.0, false };
+            return {0.0, 0.0, false};
         }
 
         double best_d = 1e9;
-        for (auto& t : tracks_) {
+        for (const auto& t : tracks_) {
             if (t.id == my_id_) continue;
-            double dist = std::hypot(t.x - me->x, t.y - me->y);
-            if (dist < best_d) {
-                best_d = dist;
-                enemy  = &t;
+            const double dxy = std::hypot(t.x - me->x, t.y - me->y);
+            if (dxy < best_d) {
+                best_d = dxy;
+                enemy = &t;
             }
         }
         if (enemy) {
@@ -201,13 +230,14 @@ Command StrategyEngine::update(image& rgb, double now)
         }
     }
 
-    // ------------------------------------------------------------
-    // 7. Run the active strategy and return the command
-    // ------------------------------------------------------------
-    Command cmd{ 0.0, 0.0, false };
+    // ---------------------------------------------------------------------
+    // 6) Run strategy. Offense now returns a fire request + target id and the
+    //    final laser command is filtered through LaserGate.
+    // ---------------------------------------------------------------------
+    Command cmd{0.0, 0.0, false};
 
     if (offense_mode_) {
-        auto [c, path] = offense_.compute(
+        auto res = offense_.compute(
             tracks_,
             my_id_,
             grid,
@@ -215,10 +245,12 @@ Command StrategyEngine::update(image& rgb, double now)
             lookahead_cells_,
             laser_close_px_,
             laser_align_deg_,
+            laser_los_margin_px_,
             v_max_,
-            obstacles
-        );
-        cmd = c;
+            obstacles);
+
+        cmd = res.cmd;
+        cmd.laser = laser_gate_.update(res.target_id, res.request_fire);
     }
     else {
         auto res = defense_.compute(
@@ -231,9 +263,10 @@ Command StrategyEngine::update(image& rgb, double now)
             80,
             v_max_,
             robot_length_px * 0.5,
-            obstacles
-        );
+            obstacles);
         cmd = res.cmd;
+        cmd.laser = false;
+        laser_gate_.reset();
     }
 
     return cmd;
