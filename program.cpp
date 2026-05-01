@@ -17,15 +17,10 @@ using namespace std;
 #include "IDDance.h"
 #include "MarkerDetector.h"
 #include "Tracking.h"
+#include "RunLogger.h"
 
 #define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
 
-// ============================================================
-// Bluetooth serial helpers
-// ============================================================
-
-// Opens a Windows serial (COM) port for Bluetooth communication with the Arduino.
-// Returns INVALID_HANDLE_VALUE on failure.
 static HANDLE openSerial(const char* port, DWORD baud)
 {
     HANDLE h = CreateFileA(port, GENERIC_WRITE, 0, NULL,
@@ -52,9 +47,6 @@ static HANDLE openSerial(const char* port, DWORD baud)
     return h;
 }
 
-// Sends a 6-byte motor command packet to the Arduino.
-// Packet format: [0xFF][pw_l_hi][pw_l_lo][pw_r_hi][pw_r_lo][laser]
-// Pulse widths are derived from normalized velocities in [-1, 1] via vel_to_pw().
 static void sendCommand(HANDLE hSerial, const Command& cmd)
 {
     if (hSerial == INVALID_HANDLE_VALUE) return;
@@ -70,10 +62,7 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
     WriteFile(hSerial, buf, sizeof(buf), &written, NULL);
 }
 
-// ============================================================
-// Main
-// ============================================================
- int main()
+int main()
 {
     SetConsoleOutputCP(CP_UTF8);
 
@@ -81,36 +70,29 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
     cout << "   PHYSICAL ROBOT — STRATEGY ENGINE" << endl;
     cout << "========================================" << endl;
 
-    // ============================================================
-    // Configuration — adjust these before each physical test run
-    // ============================================================
-
-    // PHYS_MODE 0: navigation/detection tuning only (no full strategy)
-    // PHYS_MODE 1: full offense/defense strategy active
     const int    PHYS_MODE = 1;
 
-    const char*  BT_PORT   = "COM1";   // Windows COM port for Bluetooth (check Device Manager)
-    const DWORD  BT_BAUD   = 9600;     // Must match Arduino baud rate
+    const char* BT_PORT = "COM1";   // Windows COM port for Bluetooth (check Device Manager)
+    const DWORD  BT_BAUD = 9600;     // Must match Arduino baud rate
     const int    CAM_INDEX = 0;        // Camera index (try 1 or 2 if 0 fails)
-    const int    CAM_W     = 1920;
-    const int    CAM_H     = 1080;
+    const int    CAM_W = 1920;
+    const int    CAM_H = 1080;
     const double TEST_DURATION = 120.0; // Auto-stop after this many seconds (0 = disabled)
 
-    // Navigation tuning target (pixels) — only used in PHYS_MODE 0
-    const double NAV_GOAL_X = 960.0;   // Image centre X
-    const double NAV_GOAL_Y = 540.0;   // Image centre Y
 
-    // ============================================================
-    // Open Bluetooth serial
-    // ============================================================
+    // Diagnostics output. After the run, execute:
+    //   python plot_diagnostics.py run_diagnostics.csv
+    const bool   ENABLE_LOGGING = true;
+    const char*  LOG_FILE = "run_diagnostics.csv";
+
+    const double NAV_GOAL_X = 960.0;
+    const double NAV_GOAL_Y = 540.0;
+
     HANDLE hSerial = openSerial(BT_PORT, BT_BAUD);
 
     cout << "\nPress SPACE to begin..." << endl;
     pause();
 
-    // ============================================================
-    // Activate vision (webcam)
-    // ============================================================
     activate_vision();
 
     int cam_err = activate_camera(CAM_INDEX, CAM_H, CAM_W);
@@ -122,32 +104,32 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
     }
     cout << "Camera " << CAM_INDEX << " opened OK." << endl;
 
-    // Allocate image buffer for the raw webcam frame
     image rgb;
     rgb.type   = RGB_IMAGE;
     rgb.width  = CAM_W;
     rgb.height = CAM_H;
     allocate_image(rgb);
 
-    // ============================================================
-    // Strategy engine — wraps all detection, planning, and fuzzy logic
-    // ============================================================
     StrategyEngine engine;
 
-    // ============================================================
-    // ID dance — runs once at startup to identify which robot is ours
-    // ============================================================
+    RunLogger logger;
+    if (ENABLE_LOGGING) {
+        if (logger.open(LOG_FILE)) {
+            cout << "Diagnostics logging enabled: " << LOG_FILE << endl;
+        } else {
+            cout << "WARNING: could not open diagnostics log file." << endl;
+        }
+    }
+
     IDDance   id_dance;
     MarkerDetector detector;
     Tracker   tracker;
     int       my_id = -1;
     std::vector<RobotTrack> tracks;
 
-    // ============================================================
-    // Main loop
-    // ============================================================
     double tc0 = high_resolution_time();
     double tc  = 0.0;
+    double prev_loop_t = tc0;
     int    frame_count = 0;
     bool   running = true;
 
@@ -156,52 +138,50 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
 
     while (running)
     {
+        double loop_start_abs = high_resolution_time();
+
         if (KEY('X')) {
             cout << "\nStopped by user." << endl;
             break;
         }
 
-        tc = high_resolution_time() - tc0;
+        tc = loop_start_abs - tc0;
         if (TEST_DURATION > 0.0 && tc > TEST_DURATION) {
             cout << "\nTest duration reached." << endl;
             break;
         }
 
-        // Grab the latest frame from the webcam
         acquire_image(rgb, CAM_INDEX);
+        Command last_cmd{0.0, 0.0, false};
 
-        // ---- Phase 1: ID dance — spin in place to identify our robot ----
-        // Runs until done(), then engine.setID() is called once and strategy begins.
         if (my_id < 0) {
             my_id = id_dance.run(tc, rgb, detector, tracker);
             Command cmd = id_dance.currentCommand();
             sendCommand(hSerial, cmd);
+            last_cmd = cmd;
             if (id_dance.done()) {
                 engine.setID(my_id);
                 cout << "ID dance complete — Robot ID: " << my_id << endl;
                 if (PHYS_MODE == 0)
-                    cout << "Mode: NAVIGATION TUNING — driving to ("
-                         << NAV_GOAL_X << ", " << NAV_GOAL_Y << ")" << endl;
+                    cout << "Mode: NAVIGATION TUNING — driving to (" << NAV_GOAL_X << ", " << NAV_GOAL_Y << ")" << endl;
                 else
                     cout << "Mode: FULL STRATEGY" << endl;
             }
         }
-        // ---- Phase 2a: Navigation tuning mode ----
-        // Use this to verify marker detection, obstacle detection, pixel scale,
-        // and controller gains (v_max, kL/ka/kb, cell_px) before running full strategy.
         else if (PHYS_MODE == 0) {
             Command cmd = engine.update(rgb, tc);
             sendCommand(hSerial, cmd);
+            last_cmd = cmd;
 
             if (frame_count % 30 == 0) {
                 cout << "NAV | t=" << (int)tc << "s | frame=" << frame_count
                      << " | L=" << cmd.left << " R=" << cmd.right << endl;
             }
         }
-        // ---- Phase 2b: Full strategy mode ----
         else {
             Command cmd = engine.update(rgb, tc);
             sendCommand(hSerial, cmd);
+            last_cmd = cmd;
 
             if (frame_count % 30 == 0) {
                 cout << "STRATEGY | t=" << (int)tc << "s | frame=" << frame_count
@@ -210,18 +190,21 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
             }
         }
 
-        // Display the live camera feed
-        view_rgb_image(rgb);
+        double loop_end_abs = high_resolution_time();
+        double loop_ms = (loop_end_abs - loop_start_abs) * 1000.0;
+        double dt = loop_start_abs - prev_loop_t;
+        double fps = (dt > 1e-9) ? (1.0 / dt) : 0.0;
+        prev_loop_t = loop_start_abs;
+        if (logger.isOpen()) {
+            logger.log(tc, frame_count, last_cmd, loop_ms, fps, engine.debugInfo());
+        }
 
+        view_rgb_image(rgb);
         frame_count++;
-        // No Sleep() — acquire_image() blocks until the next camera frame is ready.
-        // Strategy runs at the native camera framerate.
     }
 
-    // ============================================================
-    // Stop robot and clean up on exit
-    // ============================================================
     sendCommand(hSerial, { 0.0, 0.0, false });
+    logger.close();
 
     if (hSerial != INVALID_HANDLE_VALUE) CloseHandle(hSerial);
     stop_camera(CAM_INDEX);
@@ -229,6 +212,10 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
     deactivate_vision();
 
     cout << "\nDuration: " << tc << "s | Frames: " << frame_count << endl;
+    if (ENABLE_LOGGING) {
+        cout << "Diagnostics saved to: " << LOG_FILE << endl;
+        cout << "To generate plots: python plot_diagnostics.py " << LOG_FILE << endl;
+    }
     cout << "Press any key to exit..." << endl;
     pause();
     return 0;

@@ -28,9 +28,6 @@
     <Filter Include="Shared Types">
       <UniqueIdentifier>{a1b2c3d4-0009-0009-0009-000000000009}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Perception">
-      <UniqueIdentifier>{b83a1bc4-b333-4567-a318-f7e88357541f}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="vision.cpp">
@@ -108,18 +105,6 @@
     <ClCompile Include="program.cpp">
       <Filter>Arena &amp; Setup</Filter>
     </ClCompile>
-    <ClCompile Include="GridUtils.cpp">
-      <Filter>Pathfinding</Filter>
-    </ClCompile>
-    <ClCompile Include="LaserGate.cpp">
-      <Filter>Control</Filter>
-    </ClCompile>
-    <ClCompile Include="ColorProfiles.cpp">
-      <Filter>Perception</Filter>
-    </ClCompile>
-    <ClCompile Include="CombatGeometry.cpp">
-      <Filter>Perception</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vision.h">
@@ -194,22 +179,47 @@
     <ClInclude Include="update_simulation.h">
       <Filter>Simulation Core</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Library Include="atlsnd.lib" />
+    <Library Include="image_transfer.lib" />
+    <Library Include="strmbasd.lib" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ColorProfiles.cpp">
+      <Filter>Vision &amp; Detection</Filter>
+    </ClCompile>
+    <ClCompile Include="CombatGeometry.cpp">
+      <Filter>Strategy</Filter>
+    </ClCompile>
+    <ClCompile Include="GridUtils.cpp">
+      <Filter>Pathfinding</Filter>
+    </ClCompile>
+    <ClCompile Include="LaserGate.cpp">
+      <Filter>Control</Filter>
+    </ClCompile>
+    <ClCompile Include="RunLogger.cpp">
+      <Filter>Debug &amp; Visualization</Filter>
+    </ClCompile>
+    <ClInclude Include="ColorProfiles.h">
+      <Filter>Vision &amp; Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="CombatGeometry.h">
+      <Filter>Strategy</Filter>
+    </ClInclude>
     <ClInclude Include="GridUtils.h">
       <Filter>Pathfinding</Filter>
     </ClInclude>
     <ClInclude Include="LaserGate.h">
       <Filter>Control</Filter>
     </ClInclude>
-    <ClInclude Include="ColorProfiles.h">
-      <Filter>Perception</Filter>
-    </ClInclude>
-    <ClInclude Include="CombatGeometry.h">
-      <Filter>Perception</Filter>
+    <ClInclude Include="RunLogger.h">
+      <Filter>Debug &amp; Visualization</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Library Include="atlsnd.lib" />
-    <Library Include="image_transfer.lib" />
-    <Library Include="strmbasd.lib" />
+    <None Include="plot_diagnostics.py">
+      <Filter>Debug &amp; Visualization</Filter>
+    </None>
   </ItemGroup>
 </Project>
