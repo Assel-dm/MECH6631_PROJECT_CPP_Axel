@@ -2,7 +2,7 @@
 #include "Types.h"
 #include "image_transfer.h"
 #include "vision.h"
-#include "Tracking.h"         
+#include "Tracking.h"
 #include "Obstacles.h"
 #include "OccupancyGrid.h"
 #include "AStar.h"
@@ -12,6 +12,7 @@
 #include "Defense.h"
 #include "ColorProfiles.h"
 #include "LaserGate.h"
+#include "ProgramVariant.h"
 
 #include <map>
 #include <optional>
@@ -21,7 +22,16 @@
 class StrategyEngine {
 public:
     StrategyEngine();
+
+    // Still available for manual tests or legacy code.
     void setID(int id);
+
+    // New variant controls. They are also initialized automatically from
+    // ProgramVariant.h, but setters are useful for tests.
+    void setForcedMode(int mode);
+    void setKnownProfile(int profile);
+    void setUseIDDance(bool enabled);
+
     Command update(image& rgb, double now);
 
 private:
@@ -45,6 +55,38 @@ private:
 
     int my_id_;
     bool offense_mode_;
+
+    // Variant configuration ---------------------------------------------------
+    int forced_mode_;
+    int known_profile_;
+    bool use_id_dance_;
+
+    // Internal profile-aware ID dance ----------------------------------------
+    struct DanceSegment {
+        double duration_s;
+        double left;
+        double right;
+        bool laser;
+        int expected_omega_sign;
+    };
+
+    std::vector<DanceSegment> dance_;
+    bool dance_active_;
+    int dance_segment_idx_;
+    double dance_segment_t0_;
+    int dance_attempts_left_;
+    double id_min_energy_;
+    std::map<int, double> id_prev_theta_;
+    std::map<int, double> id_prev_time_;
+    std::map<int, double> id_score_;
+    std::map<int, double> id_energy_;
+
+    Command runIdentificationDance(double now);
+    void startDance(double now);
+    bool advanceDanceIfNeeded(double now);
+    void updateDanceScores(double now, int expected_sign);
+    int pickBestDanceID() const;
+    bool selectKnownProfileID();
 
     // Tunable parameters ------------------------------------------------------
     int cell_px_;
