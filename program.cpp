@@ -75,8 +75,8 @@ int main()
     const char* BT_PORT = "COM1";   // Windows COM port for Bluetooth (check Device Manager)
     const DWORD  BT_BAUD = 9600;     // Must match Arduino baud rate
     const int    CAM_INDEX = 0;        // Camera index (try 1 or 2 if 0 fails)
-    const int    CAM_W = 1920;
-    const int    CAM_H = 1080;
+    const int    CAM_W = 1280;
+    const int    CAM_H = 960;
     const double TEST_DURATION = 120.0; // Auto-stop after this many seconds (0 = disabled)
 
 
