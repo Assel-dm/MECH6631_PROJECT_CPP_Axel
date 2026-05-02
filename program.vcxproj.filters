@@ -114,9 +114,6 @@
     <ClCompile Include="LaserGate.cpp">
       <Filter>Control</Filter>
     </ClCompile>
-    <ClCompile Include="ColorProfiles.cpp">
-      <Filter>Perception</Filter>
-    </ClCompile>
     <ClCompile Include="CombatGeometry.cpp">
       <Filter>Perception</Filter>
     </ClCompile>
@@ -199,9 +196,6 @@
     </ClInclude>
     <ClInclude Include="LaserGate.h">
       <Filter>Control</Filter>
-    </ClInclude>
-    <ClInclude Include="ColorProfiles.h">
-      <Filter>Perception</Filter>
     </ClInclude>
     <ClInclude Include="CombatGeometry.h">
       <Filter>Perception</Filter>
