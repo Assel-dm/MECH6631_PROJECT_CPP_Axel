@@ -14,9 +14,7 @@ using namespace std;
 #include "timer.h"
 #include "Types.h"
 #include "StrategyEngine.h"
-#include "IDDance.h"
-#include "MarkerDetector.h"
-#include "Tracking.h"
+#include "ProgramVariant.h"
 
 #define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
 
@@ -87,7 +85,7 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
 
     // PHYS_MODE 0: navigation/detection tuning only (no full strategy)
     // PHYS_MODE 1: full offense/defense strategy active
-    const int    PHYS_MODE = 1;
+    const int    PHYS_MODE = PROGRAM_PHYS_MODE;
 
     const char*  BT_PORT   = "COM1";   // Windows COM port for Bluetooth (check Device Manager)
     const DWORD  BT_BAUD   = 9600;     // Must match Arduino baud rate
@@ -133,15 +131,9 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
     // Strategy engine — wraps all detection, planning, and fuzzy logic
     // ============================================================
     StrategyEngine engine;
-
-    // ============================================================
-    // ID dance — runs once at startup to identify which robot is ours
-    // ============================================================
-    IDDance   id_dance;
-    MarkerDetector detector;
-    Tracker   tracker;
-    int       my_id = -1;
-    std::vector<RobotTrack> tracks;
+    engine.setForcedMode(PROGRAM_MODE);
+    engine.setKnownProfile(PROGRAM_MY_PROFILE);
+    engine.setUseIDDance(PROGRAM_USE_ID_DANCE != 0);
 
     // ============================================================
     // Main loop
@@ -170,44 +162,19 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
         // Grab the latest frame from the webcam
         acquire_image(rgb, CAM_INDEX);
 
-        // ---- Phase 1: ID dance — spin in place to identify our robot ----
-        // Runs until done(), then engine.setID() is called once and strategy begins.
-        if (my_id < 0) {
-            my_id = id_dance.run(tc, rgb, detector, tracker);
-            Command cmd = id_dance.currentCommand();
-            sendCommand(hSerial, cmd);
-            if (id_dance.done()) {
-                engine.setID(my_id);
-                cout << "ID dance complete — Robot ID: " << my_id << endl;
-                if (PHYS_MODE == 0)
-                    cout << "Mode: NAVIGATION TUNING — driving to ("
-                         << NAV_GOAL_X << ", " << NAV_GOAL_Y << ")" << endl;
-                else
-                    cout << "Mode: FULL STRATEGY" << endl;
-            }
-        }
-        // ---- Phase 2a: Navigation tuning mode ----
-        // Use this to verify marker detection, obstacle detection, pixel scale,
-        // and controller gains (v_max, kL/ka/kb, cell_px) before running full strategy.
-        else if (PHYS_MODE == 0) {
-            Command cmd = engine.update(rgb, tc);
-            sendCommand(hSerial, cmd);
+        // ---- Strategy update ----
+        // The selected variant is controlled by ProgramVariant.h.
+        // Known-profile programs skip ID dance; challenge programs identify our robot
+        // internally using the profile-aware ID dance in StrategyEngine.
+        Command cmd = engine.update(rgb, tc);
+        sendCommand(hSerial, cmd);
 
-            if (frame_count % 30 == 0) {
-                cout << "NAV | t=" << (int)tc << "s | frame=" << frame_count
-                     << " | L=" << cmd.left << " R=" << cmd.right << endl;
-            }
-        }
-        // ---- Phase 2b: Full strategy mode ----
-        else {
-            Command cmd = engine.update(rgb, tc);
-            sendCommand(hSerial, cmd);
-
-            if (frame_count % 30 == 0) {
-                cout << "STRATEGY | t=" << (int)tc << "s | frame=" << frame_count
-                     << " | L=" << cmd.left << " R=" << cmd.right
-                     << " | laser=" << cmd.laser << endl;
-            }
+        if (frame_count % 30 == 0) {
+            const char* mode_txt = (PROGRAM_MODE == MODE_OFFENSE) ? "OFFENSE" :
+                                   (PROGRAM_MODE == MODE_DEFENSE) ? "DEFENSE" : "AUTO";
+            cout << mode_txt << " | t=" << (int)tc << "s | frame=" << frame_count
+                 << " | L=" << cmd.left << " R=" << cmd.right
+                 << " | laser=" << cmd.laser << endl;
         }
 
         // Display the live camera feed

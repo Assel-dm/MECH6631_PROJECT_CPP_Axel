@@ -141,12 +141,14 @@
     <ClCompile Include="AStar.cpp" />
     <ClCompile Include="CombatGeometry.cpp" />
     <ClCompile Include="DebugVisualizer.cpp" />
+    <ClCompile Include="ColorProfiles.cpp" />
+    <ClCompile Include="CombatGeometry.cpp" />
     <ClCompile Include="Defense.cpp" />
     <ClCompile Include="Fuzzy.cpp" />
     <ClCompile Include="GridUtils.cpp" />
     <ClCompile Include="IDDance.cpp" />
-    <ClCompile Include="LaserGate.cpp" />
     <ClCompile Include="MarkerDetector.cpp" />
+    <ClCompile Include="LaserGate.cpp" />
     <ClCompile Include="ObstaclePipeline.cpp" />
     <ClCompile Include="Obstacles.cpp" />
     <ClCompile Include="OccupancyGrid.cpp" />
@@ -156,6 +158,7 @@
     <ClCompile Include="program_IDDance_test.cpp" />
     <ClCompile Include="program_obstacles.cpp" />
     <ClCompile Include="robot.cpp" />
+    <ClCompile Include="RunLogger.cpp" />
     <ClCompile Include="shared_memory.cpp" />
     <ClCompile Include="StrategyEngine.cpp" />
     <ClCompile Include="program_sim.cpp" />
@@ -169,22 +172,25 @@
   <ItemGroup>
     <ClInclude Include="ArenaSetup.h" />
     <ClInclude Include="AStar.h" />
-    <ClInclude Include="CombatGeometry.h" />
     <ClInclude Include="DebugVisualizer.h" />
+    <ClInclude Include="ColorProfiles.h" />
+    <ClInclude Include="CombatGeometry.h" />
     <ClInclude Include="Defense.h" />
     <ClInclude Include="Fuzzy.h" />
     <ClInclude Include="GridUtils.h" />
     <ClInclude Include="IDDance.h" />
     <ClInclude Include="image_transfer.h" />
-    <ClInclude Include="LaserGate.h" />
     <ClInclude Include="MarkerDetector.h" />
+    <ClInclude Include="LaserGate.h" />
     <ClInclude Include="ObstaclePipeline.h" />
     <ClInclude Include="Obstacles.h" />
     <ClInclude Include="OccupancyGrid.h" />
     <ClInclude Include="Offense.h" />
     <ClInclude Include="OpponentBehaviour.h" />
     <ClInclude Include="Overlay.h" />
+    <ClInclude Include="ProgramVariant.h" />
     <ClInclude Include="robot.h" />
+    <ClInclude Include="RunLogger.h" />
     <ClInclude Include="shared_memory.h" />
     <ClInclude Include="StrategyEngine.h" />
     <ClInclude Include="timer.h" />
@@ -194,6 +200,9 @@
     <ClInclude Include="vision.h" />
     <ClInclude Include="vision_simulation.h" />
     <ClInclude Include="Waypoint.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="plot_diagnostics.py" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
