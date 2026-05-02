@@ -1,0 +1,11 @@
+#pragma once
+#define MODE_OFFENSE 1
+#define MODE_DEFENSE 2
+#define MODE_AUTO    3
+#define PROFILE_AUTO 0
+#define PROFILE_GR   1
+#define PROFILE_OB   2
+#define PROGRAM_MODE MODE_OFFENSE
+#define PROGRAM_MY_PROFILE PROFILE_OB
+#define PROGRAM_USE_ID_DANCE 0
+#define PROGRAM_PHYS_MODE 1
