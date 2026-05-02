@@ -108,6 +108,15 @@
     <ClCompile Include="program.cpp">
       <Filter>Arena &amp; Setup</Filter>
     </ClCompile>
+    <ClCompile Include="GridUtils.cpp">
+      <Filter>Pathfinding</Filter>
+    </ClCompile>
+    <ClCompile Include="LaserGate.cpp">
+      <Filter>Control</Filter>
+    </ClCompile>
+    <ClCompile Include="CombatGeometry.cpp">
+      <Filter>Perception</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vision.h">
@@ -221,6 +230,8 @@
     </ClInclude>
     <ClInclude Include="RunLogger.h">
       <Filter>Debug &amp; Visualization</Filter>
+    <ClInclude Include="CombatGeometry.h">
+      <Filter>Perception</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
