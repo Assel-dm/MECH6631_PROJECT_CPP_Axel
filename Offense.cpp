@@ -1,4 +1,7 @@
 #include "Offense.h"
+#include "GridUtils.h"
+#include "CombatGeometry.h"
+
 #include <cmath>
 #include <algorithm>
 
@@ -27,14 +30,13 @@ static const RobotTrack* pick_nearest_enemy(const std::vector<RobotTrack>& track
     return best;
 }
 
-OffenseStrategy::OffenseStrategy(AStarPlanner* p,
-    WaypointFollower* f,
-    FuzzyLogic* fl)
-    : planner_(p), follower_(f), fuzzy_(fl) {
-}
+OffenseStrategy::OffenseStrategy(AStarPlanner* planner,
+                                 WaypointFollower* follower,
+                                 FuzzyLogic* fuzzy)
+    : planner_(planner), follower_(follower), fuzzy_(fuzzy)
+{}
 
-std::pair<Command, std::optional<std::vector<std::pair<int, int>>>>
-OffenseStrategy::compute(
+OffenseStrategy::Result OffenseStrategy::compute(
     const std::vector<RobotTrack>& tracks,
     int my_id,
     const Grid& grid,
@@ -42,67 +44,71 @@ OffenseStrategy::compute(
     int lookahead_cells,
     double laser_close_px,
     double laser_align_deg,
+    double laser_los_margin_px,
     double v_max,
     const std::vector<Obstacle>& obstacles)
 {
-    Command stop{ 0.0, 0.0, false };
+    Result res{};
+    res.cmd = {0.0, 0.0, false};
+    res.path = std::nullopt;
+    res.target_id = std::nullopt;
+    res.request_fire = false;
 
     const RobotTrack* me = find_me(tracks, my_id);
-    const RobotTrack* target = pick_nearest_enemy(tracks, my_id);
+    const RobotTrack* enemy = pick_nearest_enemy(tracks, my_id);
+    if (!me || !enemy) return res;
 
-    if (!me || !target)
-        return { stop, std::nullopt };
-
-    // Extract tactical features
-    TacticalFeatures feat = fuzzy_->extractFeatures(*me, *target, obstacles);
+    TacticalFeatures feat = fuzzy_->extractFeatures(*me, *enemy, obstacles);
     FuzzyDecision dec = fuzzy_->offense(feat);
 
-    // Convert to grid coordinates
-    int sy = (int)(me->y / cell_px);
-    int sx = (int)(me->x / cell_px);
-    int gy = (int)(target->y / cell_px);
-    int gx = (int)(target->x / cell_px);
-
-    auto path_opt = planner_->plan(grid, { sy, sx }, { gy, gx });
-    if (!path_opt || path_opt->size() < 2)
-        return { stop, path_opt };
-
-    // Dynamic lookahead
-    int dyn_look = std::max(1, (int)std::round(lookahead_cells * dec.lookahead_scale));
-
-    int idx;
-    if (dec.prefer_alt_path && (int)path_opt->size() >= 4) {
-        idx = std::max(1, std::min((int)path_opt->size() - 2,
-            (int)std::round(0.55 * ((int)path_opt->size() - 1))));
-    }
-    else {
-        idx = std::min((int)path_opt->size() - 1, dyn_look);
+    auto start = GridUtils::safePixToFreeCell(grid, me->x, me->y, cell_px);
+    auto goal  = GridUtils::safePixToFreeCell(grid, enemy->x, enemy->y, cell_px);
+    if (!start.has_value() || !goal.has_value()) {
+        return res;
     }
 
-    auto [wy, wx] = (*path_opt)[idx];
-    double wx_pix = (wx + 0.5) * cell_px;
-    double wy_pix = (wy + 0.5) * cell_px;
+    auto path = planner_->plan(grid, start.value(), goal.value());
+    if (!path.has_value() || path->size() < 2) {
+        return res;
+    }
+    res.path = path;
 
-    double v_scaled = v_max * dec.speed_scale;
+    int dyn_look = std::max(1, static_cast<int>(std::round(lookahead_cells * dec.lookahead_scale)));
+    int idx = 1;
+    if (dec.prefer_alt_path && path->size() >= 4) {
+        idx = std::max(1, std::min(static_cast<int>(path->size()) - 2,
+                                   static_cast<int>(std::round(0.55 * (path->size() - 1)))));
+    } else {
+        idx = std::min(static_cast<int>(path->size()) - 1, dyn_look);
+    }
 
-    Command cmd = follower_->follow(
-        me->x, me->y, me->theta,
-        { wx_pix, wy_pix },
-        20.0,      // stop distance
-        2.0,       // angular gain
-        0.02,      // linear gain
-        v_scaled
-    );
+    const auto [row, col] = (*path)[idx];
+    auto waypoint = GridUtils::cellToPix(row, col, cell_px);
 
-    // Laser firing logic
-    double dx = target->x - me->x;
-    double dy = target->y - me->y;
-    double d = std::hypot(dx, dy);
-    double desired = std::atan2(dy, dx);
-    double err = angle_wrap(desired - me->theta);
-    double err_deg = std::fabs(err * 180.0 / M_PI);
+    const double v_scaled = v_max * dec.speed_scale;
+    res.cmd = follower_->follow(me->x, me->y, me->theta,
+                                waypoint,
+                                5.0,
+                                2.0,
+                                0.3,
+                                v_scaled);
+    res.cmd.laser = false;
 
-    cmd.laser = (d < laser_close_px && err_deg < laser_align_deg);
+    const double dx = enemy->x - me->x;
+    const double dy = enemy->y - me->y;
+    const double dist_to_enemy = std::hypot(dx, dy);
+    const double desired = std::atan2(dy, dx);
+    const double err = angle_wrap(desired - me->theta);
 
-    return { cmd, path_opt };
+    const bool los_ok = CombatGeometry::lineOfSightClear(me->x, me->y,
+                                                         enemy->x, enemy->y,
+                                                         obstacles,
+                                                         laser_los_margin_px);
+    const bool close_ok = dist_to_enemy < laser_close_px;
+    const bool align_ok = std::fabs(err * 180.0 / M_PI) < laser_align_deg;
+    const bool target_ok = (enemy->misses == 0);
+
+    res.target_id = enemy->id;
+    res.request_fire = (los_ok && close_ok && align_ok && target_ok);
+    return res;
 }

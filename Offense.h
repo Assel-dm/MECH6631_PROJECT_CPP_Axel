@@ -8,21 +8,28 @@
 
 class OffenseStrategy {
 public:
-    OffenseStrategy(AStarPlanner* planner,
-        WaypointFollower* follower,
-        FuzzyLogic* fuzzy);
+    struct Result {
+        Command cmd;
+        std::optional<std::vector<std::pair<int, int>>> path;
+        std::optional<int> target_id;
+        bool request_fire;
+    };
 
-    std::pair<Command, std::optional<std::vector<std::pair<int, int>>>>
-        compute(
-            const std::vector<RobotTrack>& tracks,
-            int my_id,
-            const Grid& grid,
-            int cell_px,
-            int lookahead_cells,
-            double laser_close_px,
-            double laser_align_deg,
-            double v_max,
-            const std::vector<Obstacle>& obstacles);
+    OffenseStrategy(AStarPlanner* planner,
+                    WaypointFollower* follower,
+                    FuzzyLogic* fuzzy);
+
+    Result compute(
+        const std::vector<RobotTrack>& tracks,
+        int my_id,
+        const Grid& grid,
+        int cell_px,
+        int lookahead_cells,
+        double laser_close_px,
+        double laser_align_deg,
+        double laser_los_margin_px,
+        double v_max,
+        const std::vector<Obstacle>& obstacles);
 
 private:
     AStarPlanner* planner_;
