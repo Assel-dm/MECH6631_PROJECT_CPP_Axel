@@ -1,7 +1,6 @@
 #include "StrategyEngine.h"
 #include "ObstaclePipeline.h"
 
-#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -12,12 +11,8 @@ StrategyEngine::StrategyEngine()
       defense_(&planner_, &follower_, &fuzzy_),
       laser_gate_(3, 8)
 {
-    my_id_ = -1;
+    my_id_ = 0;
     offense_mode_ = true;
-
-    forced_mode_ = PROGRAM_MODE;
-    known_profile_ = PROGRAM_MY_PROFILE;
-    use_id_dance_ = (PROGRAM_USE_ID_DANCE != 0);
 
     // Build default multi-profile color logic
     color_specs_ = buildDefaultColorSpecs();
@@ -25,19 +20,6 @@ StrategyEngine::StrategyEngine()
     for (const auto& kv : robot_profiles_) {
         expected_sep_px_map_[kv.first] = std::nullopt;
     }
-
-    // Internal ID dance configuration
-    dance_ = {
-        {0.30, +0.45, -0.45, false, +1},
-        {0.30, -0.45, +0.45, false, -1},
-        {0.30, +0.45, -0.45, false, +1},
-        {0.30,  0.00,  0.00, false,  0}
-    };
-    dance_active_ = false;
-    dance_segment_idx_ = 0;
-    dance_segment_t0_ = 0.0;
-    dance_attempts_left_ = 2;
-    id_min_energy_ = 1.5;
 
     // Grid and obstacle detection parameters
     cell_px_    = 20;
@@ -73,26 +55,6 @@ StrategyEngine::StrategyEngine()
     // Arena boundary parameters
     arena_margin_px_ = 60;
     arena_danger_px_ = 80;
-}
-
-void StrategyEngine::setID(int id)
-{
-    my_id_ = id;
-}
-
-void StrategyEngine::setForcedMode(int mode)
-{
-    forced_mode_ = mode;
-}
-
-void StrategyEngine::setKnownProfile(int profile)
-{
-    known_profile_ = profile;
-}
-
-void StrategyEngine::setUseIDDance(bool enabled)
-{
-    use_id_dance_ = enabled;
 }
 
 std::vector<RobotDet> StrategyEngine::toLegacyDets(const std::vector<ProfiledRobotDet>& dets)
@@ -133,158 +95,9 @@ void StrategyEngine::addArenaBoundaries(std::vector<Obstacle>& obs, int W, int H
     push(W - m, 0,     m, H);
 }
 
-bool StrategyEngine::selectKnownProfileID()
+void StrategyEngine::setID(int id)
 {
-    if (known_profile_ == PROFILE_AUTO) return false;
-
-    std::string wanted_profile;
-    if (known_profile_ == PROFILE_GR) wanted_profile = "GR";
-    else if (known_profile_ == PROFILE_OB) wanted_profile = "OB";
-    else return false;
-
-    int best_id = -1;
-    int best_hits = -1;
-
-    for (const auto& t : prof_tracks_) {
-        if (t.profile_name == wanted_profile && t.misses == 0) {
-            if (t.stable_hits > best_hits) {
-                best_hits = t.stable_hits;
-                best_id = t.id;
-            }
-        }
-    }
-
-    if (best_id >= 0) {
-        my_id_ = best_id;
-        return true;
-    }
-    return false;
-}
-
-void StrategyEngine::startDance(double now)
-{
-    dance_active_ = true;
-    dance_segment_idx_ = 0;
-    dance_segment_t0_ = now;
-    id_prev_theta_.clear();
-    id_prev_time_.clear();
-    id_score_.clear();
-    id_energy_.clear();
-}
-
-bool StrategyEngine::advanceDanceIfNeeded(double now)
-{
-    if (!dance_active_) return false;
-    if (dance_segment_idx_ < 0 || dance_segment_idx_ >= static_cast<int>(dance_.size())) return false;
-
-    const DanceSegment& seg = dance_[dance_segment_idx_];
-    if (now - dance_segment_t0_ >= seg.duration_s) {
-        ++dance_segment_idx_;
-        dance_segment_t0_ = now;
-        if (dance_segment_idx_ >= static_cast<int>(dance_.size())) {
-            dance_active_ = false;
-            return false;
-        }
-    }
-    return dance_active_;
-}
-
-void StrategyEngine::updateDanceScores(double now, int expected_sign)
-{
-    const double omega_clip = 8.0;
-
-    for (const auto& tr : prof_tracks_) {
-        const int tid = tr.id;
-        if (id_prev_theta_.find(tid) == id_prev_theta_.end()) {
-            id_prev_theta_[tid] = tr.theta;
-            id_prev_time_[tid] = now;
-            id_score_[tid] = 0.0;
-            id_energy_[tid] = 0.0;
-            continue;
-        }
-
-        const double dt = now - id_prev_time_[tid];
-        if (dt <= 1e-6) continue;
-
-        const double dth = angle_wrap(tr.theta - id_prev_theta_[tid]);
-        const double omega = clamp(dth / dt, -omega_clip, omega_clip);
-
-        if (expected_sign == 0) {
-            id_score_[tid] += -std::fabs(omega);
-        }
-        else {
-            id_score_[tid] += expected_sign * omega;
-            id_energy_[tid] += std::fabs(omega);
-        }
-
-        id_prev_theta_[tid] = tr.theta;
-        id_prev_time_[tid] = now;
-    }
-}
-
-int StrategyEngine::pickBestDanceID() const
-{
-    int best_id = -1;
-    double best_score = -1e18;
-
-    // First try only energetic candidates.
-    for (const auto& kv : id_score_) {
-        const int tid = kv.first;
-        const double sc = kv.second;
-        auto itE = id_energy_.find(tid);
-        const double energy = (itE == id_energy_.end()) ? 0.0 : itE->second;
-        if (energy >= id_min_energy_ && sc > best_score) {
-            best_score = sc;
-            best_id = tid;
-        }
-    }
-
-    // Fallback if the dance was weak but still produced scores.
-    if (best_id < 0) {
-        for (const auto& kv : id_score_) {
-            if (kv.second > best_score) {
-                best_score = kv.second;
-                best_id = kv.first;
-            }
-        }
-    }
-
-    return best_id;
-}
-
-Command StrategyEngine::runIdentificationDance(double now)
-{
-    if (my_id_ >= 0) return {0.0, 0.0, false};
-
-    if (prof_tracks_.empty()) {
-        return {0.0, 0.0, false};
-    }
-
-    if (!dance_active_) {
-        if (dance_attempts_left_ <= 0) {
-            const int picked = pickBestDanceID();
-            if (picked >= 0) {
-                my_id_ = picked;
-                std::cout << "[ID DANCE] selected robot id=" << my_id_ << std::endl;
-            }
-            return {0.0, 0.0, false};
-        }
-        --dance_attempts_left_;
-        startDance(now);
-    }
-
-    if (!advanceDanceIfNeeded(now)) {
-        const int picked = pickBestDanceID();
-        if (picked >= 0) {
-            my_id_ = picked;
-            std::cout << "[ID DANCE] selected robot id=" << my_id_ << std::endl;
-        }
-        return {0.0, 0.0, false};
-    }
-
-    const DanceSegment& seg = dance_[dance_segment_idx_];
-    updateDanceScores(now, seg.expected_omega_sign);
-    return {seg.left, seg.right, seg.laser};
+    my_id_ = id;
 }
 
 Command StrategyEngine::update(image& rgb, double now)
@@ -331,19 +144,6 @@ Command StrategyEngine::update(image& rgb, double now)
         max_match_dist_px_,
         max_misses_);
     tracks_ = toLegacyTracks(prof_tracks_);
-
-    // Known-profile compulsory folders: no ID dance, select our own robot by profile.
-    if (known_profile_ != PROFILE_AUTO) {
-        selectKnownProfileID();
-    }
-    // Challenge folders: profile unknown, identify by motion signature.
-    else if (use_id_dance_ && my_id_ < 0) {
-        return runIdentificationDance(now);
-    }
-
-    if (my_id_ < 0) {
-        return {0.0, 0.0, false};
-    }
 
     if (tracks_.size() < 2) {
         return {0.0, 0.0, false};
@@ -393,9 +193,11 @@ Command StrategyEngine::update(image& rgb, double now)
     Grid grid_visual = occBuilder_.build(obstacles, W, H, cell_px_, 0);
 
     // ---------------------------------------------------------------------
-    // 5) Determine offense / defense mode from ProgramVariant.h
+    // 5) Determine offense or defense mode
     // ---------------------------------------------------------------------
     const RobotTrack* me = nullptr;
+    const RobotTrack* enemy = nullptr;
+
     for (const auto& t : tracks_) {
         if (t.id == my_id_) {
             me = &t;
@@ -413,33 +215,23 @@ Command StrategyEngine::update(image& rgb, double now)
                       << ") — halting." << std::endl;
             return {0.0, 0.0, false};
         }
-    }
 
-    if (forced_mode_ == MODE_OFFENSE) {
-        offense_mode_ = true;
-    }
-    else if (forced_mode_ == MODE_DEFENSE) {
-        offense_mode_ = false;
-    }
-    else {
-        // Optional auto mode: preserve previous behavior.
-        const RobotTrack* enemy = nullptr;
-        if (me) {
-            double best_d = 1e9;
-            for (const auto& t : tracks_) {
-                if (t.id == my_id_) continue;
-                const double dxy = std::hypot(t.x - me->x, t.y - me->y);
-                if (dxy < best_d) {
-                    best_d = dxy;
-                    enemy = &t;
-                }
+        double best_d = 1e9;
+        for (const auto& t : tracks_) {
+            if (t.id == my_id_) continue;
+            const double dxy = std::hypot(t.x - me->x, t.y - me->y);
+            if (dxy < best_d) {
+                best_d = dxy;
+                enemy = &t;
             }
-            if (enemy) offense_mode_ = (best_d > 120.0);
+        }
+        if (enemy) {
+            offense_mode_ = (best_d > 120.0);
         }
     }
 
     // ---------------------------------------------------------------------
-    // 6) Run strategy. Offense returns a fire request + target id and the
+    // 6) Run strategy. Offense now returns a fire request + target id and the
     //    final laser command is filtered through LaserGate.
     // ---------------------------------------------------------------------
     Command cmd{0.0, 0.0, false};
