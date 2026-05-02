@@ -22,6 +22,7 @@ using namespace std;
 #include "Types.h"
 #include "DebugVisualizer.h"
 #include "ArenaSetup.h"
+#include "LaserGate.h"
 
 // Strategy files
 #include "Offense.h"
@@ -32,7 +33,6 @@ using namespace std;
 #include "Fuzzy.h"
 
 #define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
-
 
   /*int main()
 {
@@ -307,6 +307,8 @@ using namespace std;
     const int    LASER_LOS_FRAMES_REQ  = 6;   // ⭐ ~0.75s at 8fps — tune this
                                        // your actual fps ≈ frame_count / tc
     
+    LaserGate laser_gate(LASER_LOS_FRAMES_REQ, 8);  // 6 stable frames, 8-frame cooldown
+
     // ============ Main Loop ============
     
     tc0 = high_resolution_time();
@@ -519,6 +521,7 @@ using namespace std;
 
                     static int  los_clear_frames = 0;
                     static bool laser_fired      = false;
+                    static int opp_id = -1;  // Track which enemy we're targeting
 
                     // Laser servo — track the RED marker, not centroid
                     double bearing_to_opp = atan2(red_y - wheel_y, red_x - wheel_x);
@@ -526,37 +529,46 @@ using namespace std;
                     laser_rel_angle = std::max(-alpha_max, std::min(alpha_max, laser_rel_angle));
                     pw_laser = 1500 + (int)(laser_rel_angle / alpha_max * 500.0);
 
+                    // Calculate firing conditions
                     double dist_to_opp = std::hypot(wheel_x - red_x, wheel_y - red_y);
                     bool in_range  = dist_to_opp < LASER_MAX_RANGE_PX;
                     bool los_clear = in_range && hasLineOfSight(wheel_x, wheel_y, red_x, red_y);
 
-                    if (los_clear && !laser_fired)
-                        los_clear_frames++;
-                    else
-                        los_clear_frames = 0;
+                    // Get opponent ID
+                    for (const auto& t : tracks) {
+                        if (t.id != my_id) {
+                            opp_id = t.id;
+                            break;
+                        }
+                    }
 
-                    my_cmd.laser = (!laser_fired && los_clear_frames >= LASER_LOS_FRAMES_REQ);
+                    // ⭐ Use LaserGate to determine stable firing
+                    std::optional<int> target_id = los_clear ? std::optional<int>(opp_id) : std::nullopt;
+                    bool stable_fire = laser_gate.update(target_id, los_clear && !laser_fired);
+
+                    my_cmd.laser = stable_fire;
                     if (my_cmd.laser) {
                         laser_fired = true;
-                        freeze_on_laser = true;   // ← freeze after set_inputs
+                        freeze_on_laser = true;
                         cout << "\n*** LASER FIRED at RED MARKER! dist=" << (int)dist_to_opp
-                             << "px | stable_frames=" << los_clear_frames << " ***" << endl;
+                             << "px | LaserGate approved after " << LASER_LOS_FRAMES_REQ 
+                             << " stable frames ***" << endl;
 
                         cout << "\n╔══════════════════════════════╗" << endl;
                         cout <<   "║      GAME OVER — YOU WIN!    ║" << endl;
                         cout <<   "╚══════════════════════════════╝\n" << endl;
                     }
 
+                    // Debug output
                     if (frame_count % 20 == 0) {
                         cout << "  LOS: " << (los_clear ? "CLEAR" : "BLOCKED")
-                             << " | stable=" << los_clear_frames << "/" << LASER_LOS_FRAMES_REQ
                              << " | fired=" << laser_fired
                              << " | dist=" << (int)dist_to_opp << endl;
                     }
 
                     if (frame_count % 20 == 0)
                         cout << "  SERVO: laser_angle=" << (int)(laser_rel_angle * 180.0 / M_PI)
-                        << "° pw_laser=" << pw_laser << endl;
+                             << "° pw_laser=" << pw_laser << endl;
                 }
             }
             
