@@ -18,26 +18,14 @@ using namespace std;
 #include "Tracking.h"
 #include "IDDance.h"
 #include "Types.h"
+#include "Overlay.h"  // ⭐ Use your existing drawing functions!
 
-//#define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
+#define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
 
-/*
-// Convert Command velocity (-1 to 1) to pulse width (1000-2000 us)
-    int vel_to_pw(double vel) {
-    int pw_center = 1500;
-    int pw_range = 500;
-    // Clamp velocity to [-1, 1]
-    if (vel < -1.0) vel = -1.0;
-    if (vel > 1.0) vel = 1.0;
-    return pw_center + (int)(vel * pw_range);
-}
-*/
-/*
-int main()
+/*int main()
 {
     double x0, y0, theta0, max_speed, opponent_max_speed;
     int pw_l, pw_r, pw_laser, laser;
-    double light, light_gradient, light_dir, image_noise;
     double width1, height1;
     int N_obs, n_robot;
     double x_obs[50], y_obs[50], size_obs[50];
@@ -76,12 +64,16 @@ int main()
     // Activate regular vision library FIRST
     activate_vision();
 
-    // Then activate simulation
-    // NOTE: Make sure these BMP files exist in your project directory!
+    // Fixed: Correct activate_simulation signature
+    char obstacle_files[N_MAX][S_MAX];
+    for (int i = 0; i < N_MAX; i++)
+        strncpy_s(obstacle_files[i], "obstacle.bmp", S_MAX);
+
     int err = activate_simulation(
         width1, height1,
-        x_obs, y_obs, size_obs, N_obs,
-        "robot_BR.bmp", "robot_BR.bmp", "background.bmp", "obstacle.bmp",
+        x_obs, y_obs, N_obs,
+        "robot_A.bmp", "robot_B.bmp", "background.bmp",
+        obstacle_files,
         D, Lx, Ly, Ax, Ay, alpha_max, n_robot
     );
 
@@ -97,24 +89,23 @@ int main()
 
     cout << "\nSimulation activated successfully!" << endl;
 
-    // Set simulation mode (single player, manual opponent)
+    // Set simulation mode
     mode = 0;
-    level = 1;
-    set_simulation_mode(mode, level);
+    set_simulation_mode(mode);
 
     // ============ Set Initial Robot Positions ============
 
     // Robot 1 (YOUR robot) - Left side
-    x0 = 200;      // ✅ Left of center (640/2 = 320)
-    y0 = 240;      // Center vertically
-    theta0 = 0.0;  // Facing right
+    x0 = 200;
+    y0 = 240;
+    theta0 = 0.0;
     set_robot_position(x0, y0, theta0);
     cout << "Robot 1 (YOU) positioned at (" << x0 << ", " << y0 << "), angle = " << theta0 << endl;
 
     // Robot 2 (OPPONENT) - Right side, well separated
-    double x_opponent = 480;  // ✅ Right of center (280 pixels away)
-    double y_opponent = 240;  // Center vertically
-    double theta_opponent = M_PI;  // ✅ Facing left (toward Robot 1)
+    double x_opponent = 480;
+    double y_opponent = 240;
+    double theta_opponent = M_PI;
     set_opponent_position(x_opponent, y_opponent, theta_opponent);
     cout << "Robot 2 (OPPONENT) positioned at (" << x_opponent << ", " << y_opponent << "), angle = " << theta_opponent << endl;
 
@@ -134,25 +125,15 @@ int main()
 
     // ============ Initial Parameters ============
 
-    // Start stationary
     pw_l = 1500;
     pw_r = 1500;
     pw_laser = 1500;
     laser = 0;
 
-    max_speed = 100;              // pixels/s
+    max_speed = 100;
     opponent_max_speed = 100;
 
-    light = 1.0;
-    light_gradient = 0.0;
-    light_dir = 0.0;
-    image_noise = 0.0;
-
-    set_inputs(pw_l, pw_r, pw_laser, laser,
-        light, light_gradient, light_dir, image_noise,
-        max_speed, opponent_max_speed);
-
-    // Keep opponent stationary during dance
+    set_inputs(pw_l, pw_r, pw_laser, laser, max_speed);
     set_opponent_inputs(1500, 1500, 1500, 0, opponent_max_speed);
 
     // ============ Main Loop ============
@@ -162,55 +143,121 @@ int main()
     bool dance_complete = false;
     int my_id = -1;
 
+    std::vector<RobotTrack> tracks;
+
     cout << "\n=== Starting ID Dance ===" << endl;
     cout << "Press 'X' to exit early" << endl << endl;
 
     while (!dance_complete) {
 
-        // Check for exit key
         if (KEY('X')) {
             cout << "\nAborted by user." << endl;
             break;
         }
 
-        // Get current time
         tc = high_resolution_time() - tc0;
 
         // ============ Acquire Simulated Image ============
         acquire_image_sim(rgb);
 
+        // ============ Detect Markers ============
+        std::vector<Blob> front_blobs, rear_blobs;
+
+        // ⭐ Robot A: Green front, Red rear
+        // ⭐ Robot B: Orange front, Blue rear
+        detector.detect_two_profiles(
+            rgb,
+            ColorProfile::GR,     // Robot A (left): Green front, Red rear
+            ColorProfile::OB,     // Robot B (right): Orange front, Blue rear
+            front_blobs,          // Combined: Green + Orange
+            rear_blobs            // Combined: Red + Blue
+        );
+        
+        // ⭐ PAIR markers into robot detections (this was missing!)
+        std::optional<double> expected_sep;
+        auto detections = tracker.pairMarkers(front_blobs, rear_blobs, expected_sep, 0.55, 1200.0);
+
+        // Update tracks with paired detections
+        tracks = tracker.updateTracks(tracks, detections, tc, 80.0, 10);
+
+        // ============ 🎨 DEBUG VISUALIZATION (Using Overlay.h) ============
+        
+        // Draw detected FRONT markers (Green + Orange → show as CYAN for visibility)
+        for (const auto& blob : front_blobs) {
+            draw_circle_rgb(rgb, (int)blob.x, (int)blob.y, 10, 0, 255, 255);      // Cyan outline
+            draw_circle_rgb(rgb, (int)blob.x, (int)blob.y, 8, 100, 255, 255);     // Lighter cyan
+        }
+        
+        // Draw detected REAR markers (Red + Blue → show as MAGENTA for visibility)
+        for (const auto& blob : rear_blobs) {
+            draw_circle_rgb(rgb, (int)blob.x, (int)blob.y, 10, 255, 0, 255);      // Magenta outline
+            draw_circle_rgb(rgb, (int)blob.x, (int)blob.y, 8, 255, 100, 255);     // Lighter magenta
+        }
+        
+        // Draw robot tracks with IDs
+        for (const auto& track : tracks) {
+            int cx = (int)track.x;
+            int cy = (int)track.y;
+            
+            // Draw centroid as yellow cross
+            draw_line_rgb(rgb, cx - 15, cy, cx + 15, cy, 255, 255, 0);  // Horizontal
+            draw_line_rgb(rgb, cx, cy - 15, cx, cy + 15, 255, 255, 0);  // Vertical
+            
+            // Draw heading arrow (green) using your arrow function!
+            draw_arrow_rgb(rgb, cx, cy, track.theta, 40, 0, 255, 0);
+            
+            // Draw ID label using your text function!
+            draw_id_label(rgb, cx - 30, cy - 30, track.id);
+        }
+
         // ============ Run ID Dance ============
         my_id = id_dance.run(tc, rgb, detector, tracker);
 
-        // Get current dance command
         Command cmd = id_dance.currentCommand();
 
-        // Convert to pulse widths
         pw_l = vel_to_pw(cmd.left);
         pw_r = vel_to_pw(cmd.right);
         laser = cmd.laser ? 1 : 0;
 
-        // Update simulation inputs
-        set_inputs(pw_l, pw_r, pw_laser, laser,
-            light, light_gradient, light_dir, image_noise,
-            max_speed, opponent_max_speed);
+        set_inputs(pw_l, pw_r, pw_laser, laser, max_speed);
 
-        // ============ Status Display ============
+        // ============ 📊 DEBUG OUTPUT ============
+
+        if (frame_count % 20 == 0) {
+            cout << "\n--- Frame " << frame_count << " (t=" << tc << "s) ---" << endl;
+            cout << "Detected: " << front_blobs.size() << " front, " 
+                 << rear_blobs.size() << " rear" << endl;
+            cout << "Paired: " << detections.size() << " robots" << endl;
+            cout << "Tracks: " << tracks.size() << " active" << endl;
+            
+            for (const auto& track : tracks) {
+                cout << "  Track[" << track.id << "]: "
+                     << "pos=(" << (int)track.x << "," << (int)track.y << ") "
+                     << "theta=" << (int)(track.theta * 180.0 / M_PI) << "° "
+                     << "sep=" << (int)track.sep_px << "px" << endl;
+            }
+            
+            cout << "Command: L=" << cmd.left << " R=" << cmd.right 
+                 << " | PWM: L=" << pw_l << " R=" << pw_r << endl;
+            
+            double wheel_base = D;
+            double v_left = cmd.left * max_speed;
+            double v_right = cmd.right * max_speed;
+            double omega = (v_right - v_left) / wheel_base;
+            cout << "Angular vel: " << omega << " rad/s = " 
+                 << (omega * 180.0 / M_PI) << " deg/s" << endl;
+        }
 
         if (frame_count % 30 == 0) {
-            cout << "Time: " << tc << "s | ";
-            cout << "Frame: " << frame_count << " | ";
-
+            cout << "\nTime: " << tc << "s | Frame: " << frame_count << " | ";
             if (id_dance.done()) {
                 cout << "ID: " << my_id << " (COMPLETE)";
-            }
-            else {
+            } else {
                 cout << "Status: DANCING";
             }
             cout << endl;
         }
 
-        // Check if dance is complete
         if (id_dance.done() && !dance_complete) {
             dance_complete = true;
             cout << "\n=== ID DANCE COMPLETE ===" << endl;
@@ -219,24 +266,16 @@ int main()
             cout << "Total frames: " << frame_count << endl;
         }
 
-        // Display the simulated camera view
         view_rgb_image(rgb);
-
         frame_count++;
 
-        // Safety timeout (10 seconds)
         if (tc > 10.0 && !dance_complete) {
             cout << "\n=== TIMEOUT ===" << endl;
             cout << "Dance did not complete within 10 seconds." << endl;
-            cout << "This may indicate detection issues." << endl;
-            cout << "Check that:" << endl;
-            cout << "  - Robot markers are visible in the image" << endl;
-            cout << "  - MarkerDetector settings match your marker colors" << endl;
             break;
         }
 
-        // Frame rate control (don't simulate too fast)
-        Sleep(10); // ~100 fps max
+        Sleep(10);
     }
 
     // ============ Cleanup ============
@@ -250,4 +289,4 @@ int main()
     pause();
 
     return 0;
-} */
+}*/

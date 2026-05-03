@@ -9,6 +9,13 @@
  vision primitives (no OpenCV). Public API kept for compatibility.
 */
 
+// ⭐ Updated enum with GR and OB profiles
+enum class ColorProfile {
+    BR,  // Blue front, Red rear (default)
+    GR,  // Green front, Red rear ← NEW
+    OB   // Orange front, Blue rear ← NEW
+};
+
 // HSV range with saturation/value thresholds included for compatibility
 struct HSVRange {
     double h_lo;   // degrees [0..360)
@@ -30,6 +37,10 @@ public:
     std::vector<HSVRange> blue_ranges;
     std::vector<HSVRange> red_ranges;
 
+    // Color ranges for additional profiles
+    std::vector<HSVRange> green_ranges;
+    std::vector<HSVRange> orange_ranges;
+
     // Morphology and filtering params (public for tuning)
     int morph_iters_open = 1;
     int morph_iters_close = 2;
@@ -47,6 +58,29 @@ public:
         image& rgb,
         std::vector<Blob>& front_blobs,   // BLUE
         std::vector<Blob>& rear_blobs     // RED
+    );
+
+    // Detect GR markers (Green front, Red rear)
+    void detect_markers_GR(
+        image& rgb,
+        std::vector<Blob>& front_blobs,   // GREEN
+        std::vector<Blob>& rear_blobs     // RED
+    );
+
+    // Detect OB markers (Orange front, Blue rear)
+    void detect_markers_OB(
+        image& rgb,
+        std::vector<Blob>& front_blobs,   // ORANGE
+        std::vector<Blob>& rear_blobs     // BLUE
+    );
+
+    // Efficient dual-profile detection (only processes 2 profiles)
+    void detect_two_profiles(
+        image& rgb,
+        ColorProfile profile1,
+        ColorProfile profile2,
+        std::vector<Blob>& all_front,  // Combined front markers from both profiles
+        std::vector<Blob>& all_rear    // Combined rear markers from both profiles
     );
 
 private:

@@ -1,65 +1,64 @@
 #pragma once
 #include "Types.h"
-#include "image_transfer.h"
-#include "vision.h"
 #include "MarkerDetector.h"
 #include "Tracking.h"
-#include "Obstacles.h"
-#include "OccupancyGrid.h"
 #include "AStar.h"
+#include "OccupancyGrid.h"
 #include "Waypoint.h"
 #include "Fuzzy.h"
 #include "Offense.h"
 #include "Defense.h"
+#include <vector>
 
 class StrategyEngine {
 public:
     StrategyEngine();
+    
+    // Configuration methods
     void setID(int id);
-    Command update(image& rgb, double now);
-
+    void setColorProfile(ColorProfile profile);
+    void setOpponentProfile(ColorProfile profile);
+    void setStrategyMode(StrategyMode mode);
+    void setArenaSize(int width, int height);
+    void setMaxSpeed(double max_speed);
+    void setCellSize(int cell_px);
+    void setRobotDimensions(double width, double length);
+    
+    // Main update function
+    Command update(image& rgb, double tc);
+    
 private:
-    MarkerDetector markerDetector_;
+    // Strategy helper functions
+    Command runOffenseStrategy(image& rgb, double tc);
+    Command runDefenseStrategy(image& rgb, double tc);
+    Command runAdaptiveStrategy(image& rgb, double tc);
+    
+    // Configuration members
+    int my_id_ = -1;
+    ColorProfile my_profile_ = ColorProfile::BR;
+    ColorProfile opp_profile_ = ColorProfile::GR;
+    StrategyMode strategy_mode_ = StrategyMode::OFFENSE;
+    
+    int arena_width_ = 1920;
+    int arena_height_ = 1080;
+    double max_speed_ = 100.0;
+    double v_max_ = 1.0;  // ⭐ Normalized velocity max
+    int cell_px_ = 20;
+    double robot_width_ = 90.0;
+    double robot_length_ = 140.0;
+    
+    bool offense_mode_ = true;  // ⭐ Derived from strategy_mode_
+    
+    // Vision and tracking
+    MarkerDetector detector_;
     Tracker tracker_;
-    Obstacles obstacleDetector_;
-    OccupancyGrid occBuilder_;
+    std::vector<RobotTrack> tracks_;
+    
+    // Strategy components
     AStarPlanner planner_;
     WaypointFollower follower_;
     FuzzyLogic fuzzy_;
-    OffenseStrategy offense_;
-    DefenseStrategy defense_;
-
-    std::vector<RobotTrack> tracks_;
-    int my_id_;
-    bool offense_mode_;
-
-    // Tunable parameters
-    int cell_px_;
-    int inflate_px_;
-    int lookahead_cells_;
-    double v_max_;
-    double laser_close_px_;
-    double laser_align_deg_;
-    double max_match_dist_px_;
-    int max_misses_;
-
-    // Lab floor model thresholds (lighting adaptive)
-    float kL_;
-    float ka_;
-    float kb_;
-
-    // ── Arena boundary enforcement ────────────────────────────────────────────
-    // arena_margin_px_: width (px) of the virtual wall strip along each camera
-    //   edge added to the obstacle list so A* never plans into the border zone.
-    //   Increase if the robot still approaches the edge during normal play.
-    int arena_margin_px_;
-
-    // arena_danger_px_: if the robot's tracked centroid is within this many px
-    //   of any frame edge, all motion is halted regardless of A* output.
-    //   Set >= arena_margin_px_ so the hard-stop only fires when the path guard
-    //   has already failed (e.g. tracking lag or a sudden shove).
-    int arena_danger_px_;
-
-    // Appends four thin Obstacle strips (top/bottom/left/right) to `obs`.
-    void addArenaBoundaries(std::vector<Obstacle>& obs, int W, int H) const;
+    OccupancyGrid occupancy_grid_;
+    OffenseStrategy offense_strategy_;
+    DefenseStrategy defense_strategy_;
 };

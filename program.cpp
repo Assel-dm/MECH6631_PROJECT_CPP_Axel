@@ -134,6 +134,26 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
     // ============================================================
     StrategyEngine engine;
 
+    // ⭐ CONFIGURE ROBOT BEHAVIOR HERE
+    // Set your robot's color profile (BR = Blue front, Red rear)
+    engine.setColorProfile(ColorProfile::BR);
+
+    // Set opponent's expected profile (if known, helps with tracking)
+    engine.setOpponentProfile(ColorProfile::GR); // Or OB, depending on opponent
+
+    // ⭐ SET STRATEGY MODE: OFFENSE or DEFENSE
+    engine.setStrategyMode(StrategyMode::OFFENSE);  // ← CHANGE THIS
+    // engine.setStrategyMode(StrategyMode::DEFENSE); // Uncomment for defense
+
+    // Set arena parameters (adjust based on physical arena size)
+    engine.setArenaSize(1920, 1080); // Matches camera resolution for now
+                                      // TODO: Calibrate actual physical dimensions
+
+    // Set competition parameters
+    engine.setMaxSpeed(100.0);           // Max robot speed (adjust after testing)
+    engine.setCellSize(20);              // Grid cell size for pathfinding (pixels)
+    engine.setRobotDimensions(90.0, 140.0); // Width, Length (pixels) - collision box
+
     // ============================================================
     // ID dance — runs once at startup to identify which robot is ours
     // ============================================================

@@ -68,3 +68,10 @@ inline int vel_to_pw(double vel) {
     if (vel >  1.0) vel =  1.0;
     return pw_center + static_cast<int>(vel * pw_range);
 }
+
+// Strategy mode selection
+enum class StrategyMode {
+    OFFENSE,  // Attack opponent
+    DEFENSE,  // Defend territory
+    AUTO      // Decide based on game state (advanced)
+};

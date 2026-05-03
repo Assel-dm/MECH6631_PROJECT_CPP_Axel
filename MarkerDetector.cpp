@@ -36,6 +36,12 @@ MarkerDetector::MarkerDetector()
     min_area_ratio = 0.20;
 
     debug_dump_masks = true;
+
+    // Green range (for GR profile) - ⭐ Broad, relaxed thresholds
+    green_ranges = { {90.0, 160.0, 0.20, 30} };  // Adjust as needed
+
+    // Orange range (for BO profile)  
+    orange_ranges = { {20.0, 30.0, 0.40, 60} };  // Between red and yellow
 }
 
 // convert RGB (bytes) to HSV (h deg, s 0..1, v 0..255)
@@ -128,7 +134,7 @@ void MarkerDetector::clean_mask(image& mask, int open_iters, int close_iters, in
             copy(tmp, mask);
         }
 
-        // Closing: dilate (close_iters times) -> erode (close_iters times)
+        // Closing: dilate (close_iters times) -> erode (closeiters times)
         for (int it = 0; it < close_iters; ++it) {
             dialate(mask, tmp);
             copy(tmp, mask);
@@ -289,4 +295,157 @@ void MarkerDetector::detect_markers(
     free_image(grey);
     free_image(bin_blue);
     free_image(bin_red);
+}
+
+// ============================================================================
+// detect_markers_GR: Green front, Red rear
+// ============================================================================
+void MarkerDetector::detect_markers_GR(
+    image& rgb,
+    std::vector<Blob>& front_blobs,
+    std::vector<Blob>& rear_blobs)
+{
+    front_blobs.clear();
+    rear_blobs.clear();
+
+    // Allocate working images
+    image bin_green, bin_red, grey;
+    bin_green.type = GREY_IMAGE;
+    bin_green.width = rgb.width;
+    bin_green.height = rgb.height;
+    allocate_image(bin_green);
+
+    bin_red.type = GREY_IMAGE;
+    bin_red.width = rgb.width;
+    bin_red.height = rgb.height;
+    allocate_image(bin_red);
+
+    grey.type = GREY_IMAGE;
+    grey.width = rgb.width;
+    grey.height = rgb.height;
+    allocate_image(grey);
+    copy(rgb, grey);
+
+    // ⭐ FIX: Use thresholds FROM the ranges, not hardcoded values!
+    double green_smin = green_ranges[0].s_min;
+    int    green_vmin = green_ranges[0].v_min;
+    double red_smin   = red_ranges[0].s_min;
+    int    red_vmin   = red_ranges[0].v_min;
+
+    // Build masks using proper thresholds
+    build_mask(rgb, bin_green, green_ranges, green_smin, green_vmin);
+    build_mask(rgb, bin_red,   red_ranges,   red_smin,   red_vmin);
+
+    // Clean masks
+    clean_mask(bin_green, morph_iters_open, morph_iters_close, morph_repeat);
+    clean_mask(bin_red,   morph_iters_open, morph_iters_close, morph_repeat);
+
+    // Extract blobs
+    extract_blobs_filtered(bin_green, grey, front_blobs);  // GREEN = front
+    extract_blobs_filtered(bin_red,   grey, rear_blobs);   // RED = rear
+
+    // Cleanup
+    free_image(bin_green);
+    free_image(bin_red);
+    free_image(grey);
+}
+
+// ============================================================================
+// detect_markers_OB: Orange front, Blue rear
+// ============================================================================
+void MarkerDetector::detect_markers_OB(
+    image& rgb,
+    std::vector<Blob>& front_blobs,
+    std::vector<Blob>& rear_blobs)
+{
+    front_blobs.clear();
+    rear_blobs.clear();
+
+    // Allocate working images
+    image bin_orange, bin_blue, grey;
+    bin_orange.type = GREY_IMAGE;
+    bin_orange.width = rgb.width;
+    bin_orange.height = rgb.height;
+    allocate_image(bin_orange);
+
+    bin_blue.type = GREY_IMAGE;
+    bin_blue.width = rgb.width;
+    bin_blue.height = rgb.height;
+    allocate_image(bin_blue);
+
+    grey.type = GREY_IMAGE;
+    grey.width = rgb.width;
+    grey.height = rgb.height;
+    allocate_image(grey);
+    copy(rgb, grey);
+
+    // ⭐ FIX: Use thresholds FROM the ranges
+    double orange_smin = orange_ranges[0].s_min;
+    int    orange_vmin = orange_ranges[0].v_min;
+    double blue_smin   = blue_ranges[0].s_min;
+    int    blue_vmin   = blue_ranges[0].v_min;
+
+    // Build masks using proper thresholds
+    build_mask(rgb, bin_orange, orange_ranges, orange_smin, orange_vmin);
+    build_mask(rgb, bin_blue,   blue_ranges,   blue_smin,   blue_vmin);
+
+    // Clean masks
+    clean_mask(bin_orange, morph_iters_open, morph_iters_close, morph_repeat);
+    clean_mask(bin_blue,   morph_iters_open, morph_iters_close, morph_repeat);
+
+    // Extract blobs
+    extract_blobs_filtered(bin_orange, grey, front_blobs);  // ORANGE = front
+    extract_blobs_filtered(bin_blue,   grey, rear_blobs);   // BLUE = rear
+
+    // Cleanup
+    free_image(bin_orange);
+    free_image(bin_blue);
+    free_image(grey);
+}
+
+void MarkerDetector::detect_two_profiles(
+    image& rgb,
+    ColorProfile profile1,
+    ColorProfile profile2,
+    std::vector<Blob>& all_front,
+    std::vector<Blob>& all_rear)
+{
+    all_front.clear();
+    all_rear.clear();
+
+    std::vector<Blob> front1, rear1, front2, rear2;
+
+    // Detect profile 1
+    switch (profile1) {
+        case ColorProfile::BR:
+            detect_markers(rgb, front1, rear1);
+            break;
+        case ColorProfile::GR:
+            detect_markers_GR(rgb, front1, rear1);
+            break;
+        case ColorProfile::OB:
+            detect_markers_OB(rgb, front1, rear1);
+            break;
+    }
+
+    // Detect profile 2 (only if different from profile 1)
+    if (profile1 != profile2) {
+        switch (profile2) {
+            case ColorProfile::BR:
+                detect_markers(rgb, front2, rear2);
+                break;
+            case ColorProfile::GR:
+                detect_markers_GR(rgb, front2, rear2);
+                break;
+            case ColorProfile::OB:
+                detect_markers_OB(rgb, front2, rear2);
+                break;
+        }
+    }
+
+    // Combine results
+    all_front.insert(all_front.end(), front1.begin(), front1.end());
+    all_front.insert(all_front.end(), front2.begin(), front2.end());
+    all_rear.insert(all_rear.end(), rear1.begin(), rear1.end());
+    all_rear.insert(all_rear.end(), rear2.begin(), rear2.end());
 }

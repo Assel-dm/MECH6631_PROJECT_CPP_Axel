@@ -34,14 +34,18 @@ using namespace std;
 #define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
 
 
-  /*int main()
+   /*int main()
 {
     SetConsoleOutputCP(CP_UTF8);
     // ============ Configuration ============
     
     // SELECT TEST MODE HERE:
-    TestMode test_mode = TEST_NAVIGATION;  // ⭐ CHANGE THIS TO TEST DIFFERENT MODES
+    TestMode test_mode = TEST_OFFENSE;  // ⭐ CHANGE THIS TO TEST DIFFERENT MODES
     
+    // ⭐ SELECT COLOR PROFILES HERE:
+    ColorProfile my_profile = ColorProfile::GR;       // Your robot
+    ColorProfile opponent_profile = ColorProfile::OB; // Opponent robot
+
     // Test duration (seconds)
     double test_duration = 30.0;
     
@@ -51,6 +55,21 @@ using namespace std;
     cout << "    ROBOT STRATEGY TEST ARENA" << endl;
     cout << "========================================" << endl;
     
+    cout << "My Robot Profile: ";
+    switch (my_profile) {
+    case ColorProfile::BR: cout << "BR (Blue front, Red rear)" << endl; break;
+    case ColorProfile::GR: cout << "RG (Red front, Green rear)" << endl; break;
+    case ColorProfile::OB: cout << "BO (Blue front, Orange rear)" << endl; break;
+    }
+
+    cout << "Opponent Profile: ";
+    switch (opponent_profile) {
+    case ColorProfile::BR: cout << "BR (Blue front, Red rear)" << endl; break;
+    case ColorProfile::GR: cout << "RG (Red front, Green rear)" << endl; break;
+    case ColorProfile::OB: cout << "BO (Blue front, Orange rear)" << endl; break;
+    }
+    cout << endl;
+
     switch (test_mode) {
         case TEST_ID_DANCE:
             cout << "Mode: ID DANCE TEST" << endl;
@@ -116,7 +135,7 @@ using namespace std;
     alpha_max = M_PI / 2;
     
     // Two robots
-    n_robot = 1;
+    n_robot = 2;
     
     // ============ Activate Libraries ============
     
@@ -137,7 +156,7 @@ using namespace std;
     int err = activate_simulation(
         width1, height1,
         x_obs, y_obs, N_obs,
-        "robot_BR.bmp", "robot_BR.bmp", "background.bmp",
+        "robot_A.bmp", "robot_B.bmp", "background.bmp",
         obstacle_files,
         D, Lx, Ly, Ax, Ay, alpha_max, n_robot
     );
@@ -295,7 +314,7 @@ using namespace std;
     
     const int CELL_PX = 20;              // Grid cell size in pixels
     const double ROBOT_RADIUS = ROBOT_COLLISION_WIDTH / 2.0;  // 45px for 90px width
-    const int INFLATE_PX = static_cast<int>(ROBOT_RADIUS * 1.0);  // 45px — restored
+    const int INFLATE_PX = static_cast<int>(ROBOT_RADIUS * 1.5);  // 45px — restored
 //    const double LASER_CLOSE_PX = 50.0;  // Distance to fire laser
 //    const double LASER_ALIGN_DEG = 15.0; // Angle tolerance for laser
     const double V_MAX = 1.0;            // Max velocity
@@ -337,10 +356,12 @@ using namespace std;
         
         // ============ Acquire Image & Detect ============
         acquire_image_sim(rgb);
-        
+
         std::vector<Blob> front, rear;
-        detector.detect_markers(rgb, front, rear);
-        
+
+        // ⭐ Detect only the two declared profiles (efficient!)
+        detector.detect_two_profiles(rgb, my_profile, opponent_profile, front, rear);
+
         std::optional<double> expected_sep;
         auto dets = tracker.pairMarkers(front, rear, expected_sep, 0.55, 1200.0);
         
