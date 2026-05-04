@@ -95,6 +95,10 @@ int main()
     const int    CAM_W     = 1920;
     const int    CAM_H     = 1080;
     const double TEST_DURATION = 120.0; // Auto-stop after seconds (0 = disabled)
+
+    // Diagnostics logging
+    const bool ENABLE_DIAGNOSTICS = true;
+    const char* DIAG_CSV_PATH = "run_diagnostics.csv";
     
     // Mode selection
     cout << "\nSelect Mode:" << endl;
@@ -120,6 +124,21 @@ int main()
         return -1;
     }
     cout << "Camera opened: " << CAM_W << "x" << CAM_H << endl;
+
+    std::ofstream diag;
+    if (ENABLE_DIAGNOSTICS) {
+        diag.open(DIAG_CSV_PATH);
+        if (diag.is_open()) {
+            diag << "t,frame,mode,pwm_left,pwm_right,laser,"
+                 << "my_x,my_y,enemy_x,enemy_y,enemy_dist_px,enemy_bearing_deg,"
+                 << "nearest_obs_dist_px,num_obstacles,path_size,has_goal,path_planned,"
+                 << "detect_ms,obstacles_ms,astar_ms,control_ms,total_ms,fps\n";
+            diag << std::fixed << std::setprecision(6);
+            cout << "Diagnostics logging enabled: " << DIAG_CSV_PATH << endl;
+        } else {
+            cerr << "WARNING: could not open diagnostics CSV file" << endl;
+        }
+    }
     
     // ============================================================
     // Vision & Obstacle Pipeline Setup
@@ -188,6 +207,7 @@ int main()
         acquire_image(rgb, CAM_INDEX);
         
         // Detect markers
+        double t_detect0 = high_resolution_time();
         std::vector<Blob> front_blobs, rear_blobs;
         detector.detect_markers(rgb, front_blobs, rear_blobs);
         
@@ -196,6 +216,7 @@ int main()
         
         // Update tracking
         tracks = tracker.updateTracks(tracks, dets, tc, 80.0, 10);
+        double detect_ms = (high_resolution_time() - t_detect0) * 1000.0;
         
         // Execute ID dance choreography (synchronous)
         int result_id = id_dance.run(tc, rgb, detector, tracker);
@@ -233,7 +254,7 @@ int main()
     Sleep(500);
     
     if (!id_assigned) {
-        cout << "\n⚠️ ID assignment failed! Defaulting to ID 0." << endl;
+        cout << "\n ID assignment failed! Defaulting to ID 0." << endl;
         my_id = 0;
     }
     
@@ -260,8 +281,15 @@ int main()
     tc0 = high_resolution_time();  // Reset time counter
     tc = 0.0;
     frame_count = 0;
+    double last_loop_abs = high_resolution_time();
     
     while (true) {
+        double loop_abs0 = high_resolution_time();
+        double fps = 0.0;
+        if (loop_abs0 > last_loop_abs) {
+            fps = 1.0 / (loop_abs0 - last_loop_abs);
+        }
+        last_loop_abs = loop_abs0;
         if (KEY('X')) {
             cout << "\nStopped by user." << endl;
             break;
@@ -278,6 +306,7 @@ int main()
         acquire_image(rgb, CAM_INDEX);
         
         // Detect markers
+        double t_detect0 = high_resolution_time();
         std::vector<Blob> front_blobs, rear_blobs;
         detector.detect_markers(rgb, front_blobs, rear_blobs);
         
@@ -286,6 +315,7 @@ int main()
         
         // Update tracking
         tracks = tracker.updateTracks(tracks, dets, tc, 80.0, 10);
+        double detect_ms = (high_resolution_time() - t_detect0) * 1000.0;
         
         // Find my robot in tracking results
         RobotTrack* my_robot = nullptr;
@@ -313,12 +343,14 @@ int main()
         }
         
         // Obstacle detection
+        double t_obs0 = high_resolution_time();
         ObstaclePipelineResult pipeline_res = process_frame_obstacles(
             rgb, dets, obst, occBuilder,
             kL, ka, kb,
             min_obstacle_area, cell_px, inflate_px,
             robot_length_px, robot_width_px
         );
+        double obstacles_ms = (high_resolution_time() - t_obs0) * 1000.0;
         
         // Goal determination
         bool has_goal = false;
@@ -340,6 +372,7 @@ int main()
         }
         
         // Path planning
+        double astar_ms = 0.0;
         replan_counter++;
         if (has_goal && (!path_planned || replan_counter > REPLAN_INTERVAL)) {
             replan_counter = 0;
@@ -348,10 +381,13 @@ int main()
             int start_gy = (int)(my_robot->y / cell_px);
             int goal_gx = (int)(goal_x / cell_px);
             int goal_gy = (int)(goal_y / cell_px);
+
+            double t_astar0 = high_resolution_time();
             
             auto path_opt = planner.plan(pipeline_res.occ_grid, 
                                          {start_gx, start_gy}, 
                                          {goal_gx, goal_gy});
+            astar_ms = (high_resolution_time() - t_astar0) * 1000.0;
             
             if (path_opt.has_value()) {
                 path_pixels.clear();
@@ -364,13 +400,14 @@ int main()
                 
                 current_waypoint_idx = 0;
                 path_planned = true;
-                cout << "📍 Path planned with " << path_pixels.size() << " waypoints" << endl;
+                cout << " Path planned with " << path_pixels.size() << " waypoints" << endl;
             } else {
                 path_planned = false;
             }
         }
         
         // Control generation
+        double t_control0 = high_resolution_time();
         Command cmd = {0.0, 0.0, false};
         
         // Offense mode: fire laser if aimed at enemy
@@ -394,7 +431,7 @@ int main()
                 
                 if (dist < 350 && std::abs(angle_diff) < 0.2) {
                     cmd.laser = true;
-                    cout << "🔫 FIRING!" << endl;
+                    cout << "FIRING!" << endl;
                 }
             }
         }
@@ -412,7 +449,7 @@ int main()
             if (dist_to_wp < WAYPOINT_REACHED_DIST) {
                 current_waypoint_idx++;
                 if (current_waypoint_idx >= path_pixels.size()) {
-                    cout << "🎯 Goal reached!" << endl;
+                    cout << "Goal reached!" << endl;
                     goal_reached = true;
                     path_planned = false;
                 }
@@ -456,6 +493,49 @@ int main()
                                      k_lin * decision.speed_scale,
                                      v_max * decision.speed_scale);
             }
+        }
+
+        double control_ms = (high_resolution_time() - t_control0) * 1000.0;
+
+        // Runtime diagnostics sample
+        double enemy_x = std::numeric_limits<double>::quiet_NaN();
+        double enemy_y = std::numeric_limits<double>::quiet_NaN();
+        double enemy_dist_px = std::numeric_limits<double>::quiet_NaN();
+        double enemy_bearing_deg = std::numeric_limits<double>::quiet_NaN();
+        for (auto& tr : tracks) {
+            if (tr.id != my_id && tr.misses < 5) {
+                enemy_x = tr.x;
+                enemy_y = tr.y;
+                double dx_e = enemy_x - my_robot->x;
+                double dy_e = enemy_y - my_robot->y;
+                enemy_dist_px = std::hypot(dx_e, dy_e);
+                double desired_e = std::atan2(dy_e, dx_e);
+                double err_e = desired_e - my_robot->theta;
+                while (err_e > M_PI) err_e -= 2 * M_PI;
+                while (err_e < -M_PI) err_e += 2 * M_PI;
+                enemy_bearing_deg = err_e * 180.0 / M_PI;
+                break;
+            }
+        }
+
+        double nearest_obs_dist_px = std::numeric_limits<double>::quiet_NaN();
+        for (const auto& obs : pipeline_res.obstacles) {
+            double d_obs = std::hypot(obs.cx - my_robot->x, obs.cy - my_robot->y);
+            if (!(nearest_obs_dist_px == nearest_obs_dist_px) || d_obs < nearest_obs_dist_px) {
+                nearest_obs_dist_px = d_obs;
+            }
+        }
+
+        double total_ms = (high_resolution_time() - loop_abs0) * 1000.0;
+
+        if (diag.is_open()) {
+            diag << tc << ',' << frame_count << ',' << (offense_mode ? 1 : 0) << ','
+                 << cmd.left << ',' << cmd.right << ',' << (cmd.laser ? 1 : 0) << ','
+                 << my_robot->x << ',' << my_robot->y << ','
+                 << enemy_x << ',' << enemy_y << ',' << enemy_dist_px << ',' << enemy_bearing_deg << ','
+                 << nearest_obs_dist_px << ',' << pipeline_res.obstacles.size() << ','
+                 << path_pixels.size() << ',' << (has_goal ? 1 : 0) << ',' << (path_planned ? 1 : 0) << ','
+                 << detect_ms << ',' << obstacles_ms << ',' << astar_ms << ',' << control_ms << ',' << total_ms << ',' << fps << '\n';
         }
         
         sendCommand(hSerial, cmd);
@@ -513,6 +593,11 @@ int main()
     sendCommand(hSerial, {0.0, 0.0, false});
     
     if (hSerial != INVALID_HANDLE_VALUE) CloseHandle(hSerial);
+    if (diag.is_open()) {
+        diag.close();
+        cout << "Diagnostics saved to " << DIAG_CSV_PATH << endl;
+        cout << "Generate plots with: python plot_diagnostics.py " << DIAG_CSV_PATH << endl;
+    }
     free_image(rgb);
     
     cout << "Complete. Processed " << frame_count << " frames." << endl;
