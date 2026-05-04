@@ -1,21 +1,36 @@
-// program.cpp — Hardware test program for manual robot control via Bluetooth
-// Use arrow keys to drive the robot via Bluetooth HC-06 serial connection
+// Fully Autonomous Physical Robot - Live Camera + Vision + Planning + Control + IDDance
 #define NOMINMAX
 #define _USE_MATH_DEFINES
-#include <cstdio>
-#include <iostream>
 #include <Windows.h>
+#include <iostream>
+#include <vector>
+#include <optional>
+#include <cmath>
+#include <deque>
+
+#include "image_transfer.h"
+#include "vision.h"
+#include "timer.h"
+#include "MarkerDetector.h"
+#include "Tracking.h"
+#include "Types.h"
+#include "Overlay.h"
+#include "Obstacles.h"
+#include "ObstaclePipeline.h"
+#include "AStar.h"
+#include "OccupancyGrid.h"
+#include "Waypoint.h"
+#include "Fuzzy.h"
+#include "IDDance.h"
 
 using namespace std;
 
-#include "Types.h"
-
-#define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
+// Keyboard macro
+#define KEY(c) (GetAsyncKeyState((int)(c)) & 0x8000)
 
 // ============================================================
-// Bluetooth serial helpers
+// Bluetooth Serial Communication
 // ============================================================
-
 static HANDLE openSerial(const char* port, DWORD baud)
 {
     HANDLE h = CreateFileA(port, GENERIC_READ | GENERIC_WRITE, 0, NULL,
@@ -42,9 +57,6 @@ static HANDLE openSerial(const char* port, DWORD baud)
     return h;
 }
 
-// Sends a 6-byte motor command packet to the Arduino.
-// Packet format: [0xFF][pw_l_hi][pw_l_lo][pw_r_hi][pw_r_lo][laser]
-// Left: 1500µs neutral, right: 1480µs neutral (inverted - mirrored servos)
 static void sendCommand(HANDLE hSerial, const Command& cmd)
 {
     if (hSerial == INVALID_HANDLE_VALUE) return;
@@ -68,135 +80,441 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
 int main()
 {
     SetConsoleOutputCP(CP_UTF8);
-
+    
     cout << "\n========================================" << endl;
-    cout << "   HARDWARE TEST — BLUETOOTH CONTROL" << endl;
+    cout << "   AUTONOMOUS PHYSICAL ROBOT" << endl;
+    cout << "   Live Camera + Strategy Engine" << endl;
     cout << "========================================" << endl;
-
+    
     // ============================================================
     // Configuration
     // ============================================================
-    const char*  BT_PORT    = "COM5";   // ← Your Bluetooth COM port
-    const DWORD  BT_BAUD    = 9600;     // HC-06 baud rate
-    const double SPEED      = 0.8;      // Motor speed (0.0 to 1.0)
-    const double TURN_SPEED = 0.6;      // Turn speed (0.0 to 1.0)
-
-    cout << "\nAttempting to connect on " << BT_PORT << "..." << endl;
-
+    const char*  BT_PORT   = "COM5";   // ← Your Bluetooth COM port
+    const DWORD  BT_BAUD   = 9600;
+    const int    CAM_INDEX = 0;        // Camera index (try 1 or 2 if 0 fails)
+    const int    CAM_W     = 1920;
+    const int    CAM_H     = 1080;
+    const double TEST_DURATION = 120.0; // Auto-stop after seconds (0 = disabled)
+    
+    // Mode selection
+    cout << "\nSelect Mode:" << endl;
+    cout << "  1 - Navigation Mode (move to opposite corner)" << endl;
+    cout << "  2 - Offense Mode (track and shoot enemy robot)" << endl;
+    cout << "\nEnter mode (1 or 2): ";
+    int mode_choice;
+    cin >> mode_choice;
+    bool offense_mode = (mode_choice == 2);
+    
+    // ============================================================
+    // Initialize Hardware
+    // ============================================================
     HANDLE hSerial = openSerial(BT_PORT, BT_BAUD);
     if (hSerial == INVALID_HANDLE_VALUE) {
-        cout << "\nFailed to open Bluetooth port!" << endl;
-        cout << "1. Check Device Manager for correct COM port" << endl;
-        cout << "2. Ensure HC-06 is paired (PIN: 1234)" << endl;
-        cout << "3. Disconnect HC-06 from pins 0/1 before uploading Arduino sketch" << endl;
-        cout << "\nPress any key to exit..." << endl;
-        cin.get();
-        return 1;
+        cerr << "Failed to open Bluetooth. Exiting." << endl;
+        return -1;
     }
-
-    // Wait for Arduino to boot
-    cout << "\nWaiting for Arduino initialization..." << endl;
+    
+    if (!activate_camera(CAM_INDEX, CAM_H, CAM_W)) {
+        cerr << "ERROR: Could not open camera " << CAM_INDEX << endl;
+        CloseHandle(hSerial);
+        return -1;
+    }
+    cout << "Camera opened: " << CAM_W << "x" << CAM_H << endl;
+    
+    // ============================================================
+    // Vision & Obstacle Pipeline Setup
+    // ============================================================
+    image rgb;
+    rgb.type = RGB_IMAGE;
+    rgb.width = CAM_W;
+    rgb.height = CAM_H;
+    allocate_image(rgb);
+    
+    // HSV ranges (tuned for physical environment)
+    MarkerDetector detector;
+    detector.blue_range = {200.0, 240.0, 0.3, 50};   // Blue front marker
+    detector.red_range = {0.0, 20.0, 0.3, 50};       // Red rear marker
+    detector.min_blob_area = 2000;
+    detector.max_blob_area = 10000;
+    
+    Tracker tracker;
+    
+    const double pair_tolerance = 0.5;
+    const double pair_max_distance = 200.0;
+    
+    // Obstacle detection setup
+    const double safety_factor = 1.4;
+    const double marker_sep_in = 4.0;
+    const double robot_length_in = 6.0;
+    const double robot_width_in = 5.0;
+    const double kL = 2.5;
+    const double ka = 2.0;
+    const double kb = 2.0;
+    const int cell_px = 10;
+    const int inflate_px = 20;
+    const int min_obstacle_area = 1500;
+    
+    Obstacles obst;
+    OccupancyGrid occBuilder;
+    
+    // Strategy components
+    AStarPlanner planner;
+    WaypointFollower follower;
+    FuzzyLogic fuzzy;
+    IDDance id_dance;
+    
+    // ============================================================
+    // ID Dance Phase
+    // ============================================================
+    cout << "\n=== ID DANCE PHASE ===" << endl;
+    cout << "Robot will perform identification dance..." << endl;
+    
+    bool id_assigned = false;
+    int my_id = -1;
+    double tc0 = high_resolution_time();
+    double tc = 0.0;
+    const double ID_DANCE_DURATION = 10.0;
+    
+    vector<RobotTrack> tracks;
+    int frame_count = 0;
+    
+    cout << "Starting ID dance in 2 seconds..." << endl;
     Sleep(2000);
-
-    cout << "\n✓ Connected!" << endl;
-    cout << "\nPress SPACE to begin driving..." << endl;
-
-    while (!KEY(VK_SPACE)) {
-        Sleep(50);
+    
+    while (tc < ID_DANCE_DURATION && !id_assigned) {
+        tc = high_resolution_time() - tc0;
+        
+        // Grab frame from camera
+        acquire_image(rgb, CAM_INDEX);
+        
+        // Detect markers
+        std::vector<Blob> front_blobs, rear_blobs;
+        detector.detect_markers(rgb, front_blobs, rear_blobs);
+        
+        auto est_sep = estimate_marker_sep_px(front_blobs, rear_blobs);
+        std::vector<RobotDet> dets = tracker.pairMarkers(front_blobs, rear_blobs, est_sep, pair_tolerance, pair_max_distance);
+        
+        // Update tracking
+        tracks = tracker.updateTracks(tracks, dets, tc, 80.0, 10);
+        
+        // Execute ID dance choreography (synchronous)
+        int result_id = id_dance.run(tc, rgb, detector, tracker);
+        Command dance_cmd = id_dance.currentCommand();
+        sendCommand(hSerial, dance_cmd);
+        
+        // Check if dance is complete
+        if (id_dance.done()) {
+            my_id = id_dance.my_id();
+            id_assigned = true;
+            cout << "\n✓ ID Assigned: " << my_id << endl;
+        }
+        
+        // Visualization
+        for (auto& tr : tracks) {
+            draw_circle_rgb(rgb, (int)tr.x, (int)tr.y, 15, 255, 255, 0);
+            draw_arrow_rgb(rgb, (int)tr.x, (int)tr.y, tr.theta, 30, 255, 255, 0);
+            
+            char buf[32];
+            sprintf_s(buf, "ID:%d", tr.id);
+            draw_text_rgb(rgb, (int)tr.x + 20, (int)tr.y - 20, buf, 255, 255, 0);
+        }
+        
+        draw_text_rgb(rgb, 10, 10, "ID DANCE", 255, 255, 0);
+        char time_buf[32];
+        sprintf_s(time_buf, "T:%.1fs", tc);
+        draw_text_rgb(rgb, 10, 20, time_buf, 255, 255, 255);
+        
+        view_rgb_image(rgb);
+        frame_count++;
     }
-
-    cout << "\n=== CONTROLS ===" << endl;
-    cout << "  UP ARROW    : Forward" << endl;
-    cout << "  DOWN ARROW  : Backward" << endl;
-    cout << "  LEFT ARROW  : Turn left" << endl;
-    cout << "  RIGHT ARROW : Turn right" << endl;
-    cout << "  SPACE       : Stop" << endl;
-    cout << "  L           : Toggle laser" << endl;
-    cout << "  X           : Exit" << endl;
-    cout << "\nReady! Use arrow keys to control the robot." << endl;
-    cout << "========================================\n" << endl;
-
-    bool laser_on = false;
-    Command cmd   = { 0.0, 0.0, false };
-
-    // One-shot print flags — print direction once per key press
-    bool up_was    = false;
-    bool down_was  = false;
-    bool left_was  = false;
-    bool right_was = false;
-    bool l_was     = false;
-
-    while (true)
-    {
-        // Exit
+    
+    // Stop after ID dance
+    sendCommand(hSerial, {0.0, 0.0, false});
+    Sleep(500);
+    
+    if (!id_assigned) {
+        cout << "\n⚠️ ID assignment failed! Defaulting to ID 0." << endl;
+        my_id = 0;
+    }
+    
+    // ============================================================
+    // Autonomous Operation Phase
+    // ============================================================
+    cout << "\n=== AUTONOMOUS OPERATION ===" << endl;
+    cout << "Starting autonomous navigation..." << endl;
+    cout << "My Robot ID: " << my_id << endl;
+    cout << "Mode: " << (offense_mode ? "OFFENSE" : "NAVIGATION") << endl;
+    cout << "\nSystem will run autonomously. Press 'X' to stop.\n" << endl;
+    
+    Sleep(1000);
+    
+    // Path management (manual - WaypointFollower doesn't manage paths)
+    vector<pair<double, double>> path_pixels;
+    size_t current_waypoint_idx = 0;
+    bool path_planned = false;
+    bool goal_reached = false;
+    int replan_counter = 0;
+    const int REPLAN_INTERVAL = 30;
+    const double WAYPOINT_REACHED_DIST = 60.0;
+    
+    tc0 = high_resolution_time();  // Reset time counter
+    tc = 0.0;
+    frame_count = 0;
+    
+    while (true) {
         if (KEY('X')) {
-            cout << "Exiting..." << endl;
+            cout << "\nStopped by user." << endl;
             break;
         }
-
-        // Laser toggle
-        if (KEY('L')) {
-            if (!l_was) {
-                laser_on = !laser_on;
-                cout << "Laser: " << (laser_on ? "ON" : "OFF") << endl;
-                l_was = true;
+        
+        if (TEST_DURATION > 0.0 && tc > TEST_DURATION) {
+            cout << "\nTest duration reached." << endl;
+            break;
+        }
+        
+        tc = high_resolution_time() - tc0;
+        
+        // Grab frame from live camera
+        acquire_image(rgb, CAM_INDEX);
+        
+        // Detect markers
+        std::vector<Blob> front_blobs, rear_blobs;
+        detector.detect_markers(rgb, front_blobs, rear_blobs);
+        
+        auto est_sep = estimate_marker_sep_px(front_blobs, rear_blobs);
+        std::vector<RobotDet> dets = tracker.pairMarkers(front_blobs, rear_blobs, est_sep, pair_tolerance, pair_max_distance);
+        
+        // Update tracking
+        tracks = tracker.updateTracks(tracks, dets, tc, 80.0, 10);
+        
+        // Find my robot in tracking results
+        RobotTrack* my_robot = nullptr;
+        for (auto& tr : tracks) {
+            if (tr.id == my_id && tr.misses < 3) {
+                my_robot = &tr;
+                break;
+            }
+        }
+        
+        if (!my_robot) {
+            sendCommand(hSerial, {0.0, 0.0, false});
+            draw_text_rgb(rgb, 10, 10, "ROBOT LOST", 255, 0, 0);
+            view_rgb_image(rgb);
+            continue;
+        }
+        
+        // Compute robot dimensions from estimated marker separation
+        int robot_length_px = 60;
+        int robot_width_px = 40;
+        if (est_sep.has_value()) {
+            double px_per_in = est_sep.value() / marker_sep_in;
+            robot_length_px = (int)(robot_length_in * px_per_in * safety_factor);
+            robot_width_px = (int)(robot_width_in * px_per_in * safety_factor);
+        }
+        
+        // Obstacle detection
+        ObstaclePipelineResult pipeline_res = process_frame_obstacles(
+            rgb, dets, obst, occBuilder,
+            kL, ka, kb,
+            min_obstacle_area, cell_px, inflate_px,
+            robot_length_px, robot_width_px
+        );
+        
+        // Goal determination
+        bool has_goal = false;
+        double goal_x = 0.0, goal_y = 0.0;
+        
+        if (offense_mode && tracks.size() > 1) {
+            for (auto& tr : tracks) {
+                if (tr.id != my_id && tr.misses < 5) {
+                    goal_x = tr.x;
+                    goal_y = tr.y;
+                    has_goal = true;
+                    break;
+                }
             }
         } else {
-            l_was = false;
+            goal_x = CAM_W - my_robot->x;
+            goal_y = CAM_H - my_robot->y;
+            has_goal = true;
         }
-
-        // Reset command each loop
-        cmd.left  = 0.0;
-        cmd.right = 0.0;
-        cmd.laser = laser_on;
-
-        // Arrow key controls
-        if (KEY(VK_UP)) {
-            cmd.left  = SPEED;
-            cmd.right = SPEED;
-            if (!up_was) { cout << "Forward" << endl; up_was = true; }
-            down_was = left_was = right_was = false;
+        
+        // Path planning
+        replan_counter++;
+        if (has_goal && (!path_planned || replan_counter > REPLAN_INTERVAL)) {
+            replan_counter = 0;
+            
+            int start_gx = (int)(my_robot->x / cell_px);
+            int start_gy = (int)(my_robot->y / cell_px);
+            int goal_gx = (int)(goal_x / cell_px);
+            int goal_gy = (int)(goal_y / cell_px);
+            
+            auto path_opt = planner.plan(pipeline_res.occ_grid, 
+                                         {start_gx, start_gy}, 
+                                         {goal_gx, goal_gy});
+            
+            if (path_opt.has_value()) {
+                path_pixels.clear();
+                auto& path_grid = path_opt.value();
+                for (size_t i = 0; i < path_grid.size(); ++i) {
+                    int gx = path_grid[i].first;
+                    int gy = path_grid[i].second;
+                    path_pixels.push_back({(double)(gx * cell_px), (double)(gy * cell_px)});
+                }
+                
+                current_waypoint_idx = 0;
+                path_planned = true;
+                cout << "📍 Path planned with " << path_pixels.size() << " waypoints" << endl;
+            } else {
+                path_planned = false;
+            }
         }
-        else if (KEY(VK_DOWN)) {
-            cmd.left  = -SPEED;
-            cmd.right = -SPEED;
-            if (!down_was) { cout << "Backward" << endl; down_was = true; }
-            up_was = left_was = right_was = false;
+        
+        // Control generation
+        Command cmd = {0.0, 0.0, false};
+        
+        // Offense mode: fire laser if aimed at enemy
+        if (offense_mode && tracks.size() > 1) {
+            RobotTrack* enemy = nullptr;
+            for (auto& tr : tracks) {
+                if (tr.id != my_id) {
+                    enemy = &tr;
+                    break;
+                }
+            }
+            
+            if (enemy) {
+                double dx = enemy->x - my_robot->x;
+                double dy = enemy->y - my_robot->y;
+                double dist = std::hypot(dx, dy);
+                double target_angle = std::atan2(dy, dx);
+                double angle_diff = target_angle - my_robot->theta;
+                while (angle_diff > M_PI) angle_diff -= 2*M_PI;
+                while (angle_diff < -M_PI) angle_diff += 2*M_PI;
+                
+                if (dist < 350 && std::abs(angle_diff) < 0.2) {
+                    cmd.laser = true;
+                    cout << "🔫 FIRING!" << endl;
+                }
+            }
         }
-        else if (KEY(VK_LEFT)) {
-            cmd.left  = -TURN_SPEED;
-            cmd.right =  TURN_SPEED;
-            if (!left_was) { cout << "Turn left" << endl; left_was = true; }
-            up_was = down_was = right_was = false;
+        
+        // Waypoint following
+        if (path_planned && current_waypoint_idx < path_pixels.size()) {
+            double wx = path_pixels[current_waypoint_idx].first;
+            double wy = path_pixels[current_waypoint_idx].second;
+            
+            double dx = wx - my_robot->x;
+            double dy = wy - my_robot->y;
+            double dist_to_wp = std::hypot(dx, dy);
+            
+            // Check if reached current waypoint
+            if (dist_to_wp < WAYPOINT_REACHED_DIST) {
+                current_waypoint_idx++;
+                if (current_waypoint_idx >= path_pixels.size()) {
+                    cout << "🎯 Goal reached!" << endl;
+                    goal_reached = true;
+                    path_planned = false;
+                }
+            }
+            
+            // Use WaypointFollower.follow() for single waypoint control
+            if (current_waypoint_idx < path_pixels.size()) {
+                double current_wx = path_pixels[current_waypoint_idx].first;
+                double current_wy = path_pixels[current_waypoint_idx].second;
+                
+                // Use fuzzy logic for tactical control
+                TacticalFeatures features;
+                features.enemy_dist = 9999.0;
+                features.enemy_bearing_deg = 0.0;
+                features.nearest_obs_dist = 9999.0;
+                features.n_blocking = 0;
+                features.has_cover = 0.0;
+                features.close_danger = 0.0;
+                features.obstacle_pressure = 0.0;
+                features.surprise_desire = 0.0;
+                
+                // Find nearest obstacle
+                for (const auto& obs : pipeline_res.obstacles) {
+                    double obs_dist = std::hypot(obs.cx - my_robot->x, obs.cy - my_robot->y);
+                    if (obs_dist < features.nearest_obs_dist) {
+                        features.nearest_obs_dist = obs_dist;
+                    }
+                }
+                
+                FuzzyDecision decision = offense_mode ? fuzzy.offense(features) : fuzzy.defense(features);
+                
+                // Basic waypoint following control
+                const double k_ang = 2.5;
+                const double k_lin = 0.5;
+                const double v_max = 80.0;
+                
+                cmd = follower.follow(my_robot->x, my_robot->y, my_robot->theta,
+                                     {current_wx, current_wy},
+                                     WAYPOINT_REACHED_DIST,
+                                     k_ang * decision.lookahead_scale,
+                                     k_lin * decision.speed_scale,
+                                     v_max * decision.speed_scale);
+            }
         }
-        else if (KEY(VK_RIGHT)) {
-            cmd.left  =  TURN_SPEED;
-            cmd.right = -TURN_SPEED;
-            if (!right_was) { cout << "Turn right" << endl; right_was = true; }
-            up_was = down_was = left_was = false;
-        }
-        else if (KEY(VK_SPACE)) {
-            cmd.left  = 0.0;
-            cmd.right = 0.0;
-            up_was = down_was = left_was = right_was = false;
-        }
-        else {
-            up_was = down_was = left_was = right_was = false;
-        }
-
+        
         sendCommand(hSerial, cmd);
-        Sleep(50);
+        
+        // Visualization
+        for (auto& tr : tracks) {
+            int R = (tr.id == my_robot->id) ? 0 : 255;
+            int G = (tr.id == my_robot->id) ? 255 : 0;
+            int B = 0;
+            
+            draw_circle_rgb(rgb, (int)tr.x, (int)tr.y, 15, R, G, B);
+            draw_arrow_rgb(rgb, (int)tr.x, (int)tr.y, tr.theta, 30, R, G, B);
+            
+            char buf[64];
+            sprintf_s(buf, (tr.id == my_robot->id) ? "YOU(ID:%d)" : "TARGET(ID:%d)", tr.id);
+            draw_text_rgb(rgb, (int)tr.x + 20, (int)tr.y - 20, buf, R, G, B);
+        }
+        
+        // Draw current waypoint
+        if (path_planned && current_waypoint_idx < path_pixels.size()) {
+            double wx = path_pixels[current_waypoint_idx].first;
+            double wy = path_pixels[current_waypoint_idx].second;
+            draw_circle_rgb(rgb, (int)wx, (int)wy, 15, 0, 255, 255);
+            draw_line_rgb(rgb, (int)my_robot->x, (int)my_robot->y, (int)wx, (int)wy, 0, 255, 255);
+        }
+        
+        if (has_goal) {
+            draw_circle_rgb(rgb, (int)goal_x, (int)goal_y, 25, 255, 0, 255);
+            draw_text_rgb(rgb, (int)goal_x + 30, (int)goal_y - 10, "GOAL", 255, 0, 255);
+        }
+        
+        for (const auto& obs : pipeline_res.obstacles) {
+            draw_obstacle_overlay(rgb, obs, 255, 128, 0);
+        }
+        
+        for (const auto& d : dets) {
+            draw_robot_mask_overlay(rgb, d, robot_length_px, robot_width_px, 255, 255, 100);
+        }
+        
+        draw_text_rgb(rgb, 10, 10, offense_mode ? "OFFENSE" : "NAVIGATE", 255, 255, 0);
+        draw_text_rgb(rgb, 10, 20, goal_reached ? "COMPLETE" : "RUNNING", 0, 255, 0);
+        
+        char time_buf[32];
+        sprintf_s(time_buf, "T:%.1fs", tc);
+        draw_text_rgb(rgb, 10, 30, time_buf, 255, 255, 255);
+        
+        view_rgb_image(rgb);
+        frame_count++;
     }
-
-    // Stop robot and clean up
-    cout << "Stopping robot..." << endl;
-    sendCommand(hSerial, { 0.0, 0.0, false });
-    Sleep(100);
-
-    CloseHandle(hSerial);
-
-    cout << "Done." << endl;
-    cout << "Press any key to exit..." << endl;
-    cin.get();
+    
+    // ============================================================
+    // Cleanup
+    // ============================================================
+    cout << "\nShutting down..." << endl;
+    sendCommand(hSerial, {0.0, 0.0, false});
+    
+    if (hSerial != INVALID_HANDLE_VALUE) CloseHandle(hSerial);
+    free_image(rgb);
+    
+    cout << "Complete. Processed " << frame_count << " frames." << endl;
     return 0;
 }

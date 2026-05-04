@@ -149,6 +149,7 @@
     <ClCompile Include="OccupancyGrid.cpp" />
     <ClCompile Include="Offense.cpp" />
     <ClCompile Include="Overlay.cpp" />
+    <ClCompile Include="program_arduino_bluetooth.cpp" />
     <ClCompile Include="program.cpp" />
     <ClCompile Include="program_IDDance_test.cpp" />
     <ClCompile Include="program_obstacles.cpp" />

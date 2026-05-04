@@ -25,16 +25,6 @@ MarkerDetector::MarkerDetector()
     blue_ranges = { blue_range };
     red_ranges = { {0.0, 10.0, red_range.s_min, red_range.v_min}, {335.0, 360.0, red_range.s_min, red_range.v_min} };
 
-    // morphology defaults (already initialized in header, repeat here for clarity)
-    morph_iters_open = 1;
-    morph_iters_close = 2;
-    morph_repeat = 1;
-
-    // blob filters
-    min_blob_area = 60;
-    max_blob_area = 3000;
-    min_area_ratio = 0.20;
-
     debug_dump_masks = true;
 
     // Green range (for GR profile) - ⭐ Broad, relaxed thresholds
@@ -180,10 +170,10 @@ void MarkerDetector::extract_blobs_filtered(image& mask, image& grey_for_centroi
                 }
             }
         }
-
+        
         if (area < min_blob_area) continue;
         if (max_blob_area > 0 && area > max_blob_area) continue;
-
+        
         int bw = std::max(1, maxx - minx + 1);
         int bh = std::max(1, maxy - miny + 1);
         double area_ratio = (double)area / (double)(bw * bh);

@@ -179,3 +179,43 @@ void draw_obstacle_overlay(image& img, const Obstacle& obs, int R, int G, int B)
     // text (slightly offset for padding)
     draw_text_rgb(img, tx + 1, ty + 1, buf, R, G, B);
 }
+
+// Draw robot safety mask as a rotated rectangle
+void draw_robot_mask_overlay(image& img, const RobotDet& det, int length_px, int width_px, int R, int G, int B)
+{
+    double cx = det.x;
+    double cy = det.y;
+    double theta = det.theta;
+    
+    double cos_t = std::cos(theta);
+    double sin_t = std::sin(theta);
+    
+    // ⭐ Match ObstaclePipeline coordinate system
+    double hl = length_px / 2.0;  // half-length along robot's forward axis
+    double hw = width_px / 2.0;   // half-width perpendicular to forward
+    
+    // Corners in local frame (length=X, width=Y)
+    double corners[4][2] = {
+        {-hl, -hw},  // rear-left
+        {+hl, -hw},  // front-left
+        {+hl, +hw},  // front-right
+        {-hl, +hw}   // rear-right
+    };
+    
+    int px[4], py[4];
+    for (int i = 0; i < 4; ++i) {
+        double rx = corners[i][0];
+        double ry = corners[i][1];
+        // Rotate by theta
+        double wx = cx + rx * cos_t - ry * sin_t;
+        double wy = cy + rx * sin_t + ry * cos_t;
+        px[i] = (int)std::round(wx);
+        py[i] = (int)std::round(wy);
+    }
+    
+    // Draw rectangle
+    for (int i = 0; i < 4; ++i) {
+        int next = (i + 1) % 4;
+        draw_line_rgb(img, px[i], py[i], px[next], py[next], R, G, B);
+    }
+}

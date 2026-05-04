@@ -38,3 +38,6 @@ void draw_robot_overlay(image& img, const RobotTrack& tr, int R, int G, int B);
 // Draw an obstacle visualization (bbox + area label)
 void draw_obstacle_overlay(image& img, const Obstacle& obs, int R, int G, int B);
 
+// Draw robot safety mask (rotated rectangle showing exclusion zone)
+void draw_robot_mask_overlay(image& img, const RobotDet& det, int length_px, int width_px, int R, int G, int B);
+

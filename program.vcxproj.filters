@@ -93,13 +93,16 @@
     <ClCompile Include="program_IDDance_test.cpp">
       <Filter>Test Programs</Filter>
     </ClCompile>
-    <ClCompile Include="program_obstacles.cpp">
-      <Filter>Test Programs</Filter>
-    </ClCompile>
     <ClCompile Include="update_simulation.cpp">
       <Filter>Simulation Core</Filter>
     </ClCompile>
     <ClCompile Include="program_sim.cpp">
+      <Filter>Test Programs</Filter>
+    </ClCompile>
+    <ClCompile Include="program_arduino_bluetooth.cpp">
+      <Filter>Test Programs</Filter>
+    </ClCompile>
+    <ClCompile Include="program_obstacles.cpp">
       <Filter>Test Programs</Filter>
     </ClCompile>
     <ClCompile Include="program.cpp">

@@ -43,12 +43,12 @@ public:
 
     // Morphology and filtering params (public for tuning)
     int morph_iters_open = 1;
-    int morph_iters_close = 2;
+    int morph_iters_close = 1;     // REDUCE closing to 1 (was 2)
     int morph_repeat = 1;
 
-    int min_blob_area = 60;
-    int max_blob_area = 3000;
-    double min_area_ratio = 0.20;
+    int min_blob_area = 4000;        
+    int max_blob_area = 20000;     // INCREASED to handle large markers
+    double min_area_ratio = 0.05;     // MUCH more lenient shape filter
 
     // Debug flag
     bool debug_dump_masks = false;
