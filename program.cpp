@@ -1,22 +1,14 @@
-// program.cpp — Physical robot entry point
-// All strategy computation runs on-PC; commands are sent to Arduino over Bluetooth serial.
+// program.cpp — Hardware test program for manual robot control via Bluetooth
+// Use arrow keys to drive the robot via Bluetooth HC-06 serial connection
 #define NOMINMAX
 #define _USE_MATH_DEFINES
 #include <cstdio>
 #include <iostream>
-#include <cmath>
 #include <Windows.h>
 
 using namespace std;
 
-#include "image_transfer.h"
-#include "vision.h"
-#include "timer.h"
 #include "Types.h"
-#include "StrategyEngine.h"
-#include "IDDance.h"
-#include "MarkerDetector.h"
-#include "Tracking.h"
 
 #define KEY(c) ( GetAsyncKeyState((int)(c)) & (SHORT)0x8000 )
 
@@ -24,11 +16,9 @@ using namespace std;
 // Bluetooth serial helpers
 // ============================================================
 
-// Opens a Windows serial (COM) port for Bluetooth communication with the Arduino.
-// Returns INVALID_HANDLE_VALUE on failure.
 static HANDLE openSerial(const char* port, DWORD baud)
 {
-    HANDLE h = CreateFileA(port, GENERIC_WRITE, 0, NULL,
+    HANDLE h = CreateFileA(port, GENERIC_READ | GENERIC_WRITE, 0, NULL,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) {
         cerr << "ERROR: Could not open " << port << endl;
@@ -54,12 +44,14 @@ static HANDLE openSerial(const char* port, DWORD baud)
 
 // Sends a 6-byte motor command packet to the Arduino.
 // Packet format: [0xFF][pw_l_hi][pw_l_lo][pw_r_hi][pw_r_lo][laser]
-// Pulse widths are derived from normalized velocities in [-1, 1] via vel_to_pw().
+// Left: 1500µs neutral, right: 1480µs neutral (inverted - mirrored servos)
 static void sendCommand(HANDLE hSerial, const Command& cmd)
 {
     if (hSerial == INVALID_HANDLE_VALUE) return;
-    int pw_l = vel_to_pw(cmd.left);
-    int pw_r = vel_to_pw(cmd.right);
+
+    int pw_l = vel_to_pw_left(cmd.left);
+    int pw_r = vel_to_pw_right(cmd.right);
+
     uint8_t buf[6] = {
         0xFF,
         (uint8_t)(pw_l >> 8), (uint8_t)(pw_l & 0xFF),
@@ -73,183 +65,138 @@ static void sendCommand(HANDLE hSerial, const Command& cmd)
 // ============================================================
 // Main
 // ============================================================
- int main()
+int main()
 {
     SetConsoleOutputCP(CP_UTF8);
 
     cout << "\n========================================" << endl;
-    cout << "   PHYSICAL ROBOT — STRATEGY ENGINE" << endl;
+    cout << "   HARDWARE TEST — BLUETOOTH CONTROL" << endl;
     cout << "========================================" << endl;
 
     // ============================================================
-    // Configuration — adjust these before each physical test run
+    // Configuration
     // ============================================================
+    const char*  BT_PORT    = "COM5";   // ← Your Bluetooth COM port
+    const DWORD  BT_BAUD    = 9600;     // HC-06 baud rate
+    const double SPEED      = 0.8;      // Motor speed (0.0 to 1.0)
+    const double TURN_SPEED = 0.6;      // Turn speed (0.0 to 1.0)
 
-    // PHYS_MODE 0: navigation/detection tuning only (no full strategy)
-    // PHYS_MODE 1: full offense/defense strategy active
-    const int    PHYS_MODE = 1;
+    cout << "\nAttempting to connect on " << BT_PORT << "..." << endl;
 
-    const char*  BT_PORT   = "COM1";   // Windows COM port for Bluetooth (check Device Manager)
-    const DWORD  BT_BAUD   = 9600;     // Must match Arduino baud rate
-    const int    CAM_INDEX = 0;        // Camera index (try 1 or 2 if 0 fails)
-    const int    CAM_W     = 1920;
-    const int    CAM_H     = 1080;
-    const double TEST_DURATION = 120.0; // Auto-stop after this many seconds (0 = disabled)
-
-    // Navigation tuning target (pixels) — only used in PHYS_MODE 0
-    const double NAV_GOAL_X = 960.0;   // Image centre X
-    const double NAV_GOAL_Y = 540.0;   // Image centre Y
-
-    // ============================================================
-    // Open Bluetooth serial
-    // ============================================================
     HANDLE hSerial = openSerial(BT_PORT, BT_BAUD);
-
-    cout << "\nPress SPACE to begin..." << endl;
-    pause();
-
-    // ============================================================
-    // Activate vision (webcam)
-    // ============================================================
-    activate_vision();
-
-    int cam_err = activate_camera(CAM_INDEX, CAM_H, CAM_W);
-    if (cam_err != 0) {
-        cout << "ERROR: activate_camera failed (code " << cam_err << "). Try CAM_INDEX 1 or 2." << endl;
-        deactivate_vision();
-        pause();
+    if (hSerial == INVALID_HANDLE_VALUE) {
+        cout << "\nFailed to open Bluetooth port!" << endl;
+        cout << "1. Check Device Manager for correct COM port" << endl;
+        cout << "2. Ensure HC-06 is paired (PIN: 1234)" << endl;
+        cout << "3. Disconnect HC-06 from pins 0/1 before uploading Arduino sketch" << endl;
+        cout << "\nPress any key to exit..." << endl;
+        cin.get();
         return 1;
     }
-    cout << "Camera " << CAM_INDEX << " opened OK." << endl;
 
-    // Allocate image buffer for the raw webcam frame
-    image rgb;
-    rgb.type   = RGB_IMAGE;
-    rgb.width  = CAM_W;
-    rgb.height = CAM_H;
-    allocate_image(rgb);
+    // Wait for Arduino to boot
+    cout << "\nWaiting for Arduino initialization..." << endl;
+    Sleep(2000);
 
-    // ============================================================
-    // Strategy engine — wraps all detection, planning, and fuzzy logic
-    // ============================================================
-    StrategyEngine engine;
+    cout << "\n✓ Connected!" << endl;
+    cout << "\nPress SPACE to begin driving..." << endl;
 
-    // ⭐ CONFIGURE ROBOT BEHAVIOR HERE
-    // Set your robot's color profile (BR = Blue front, Red rear)
-    engine.setColorProfile(ColorProfile::BR);
-
-    // Set opponent's expected profile (if known, helps with tracking)
-    engine.setOpponentProfile(ColorProfile::GR); // Or OB, depending on opponent
-
-    // ⭐ SET STRATEGY MODE: OFFENSE or DEFENSE
-    engine.setStrategyMode(StrategyMode::OFFENSE);  // ← CHANGE THIS
-    // engine.setStrategyMode(StrategyMode::DEFENSE); // Uncomment for defense
-
-    // Set arena parameters (adjust based on physical arena size)
-    engine.setArenaSize(1920, 1080); // Matches camera resolution for now
-                                      // TODO: Calibrate actual physical dimensions
-
-    // Set competition parameters
-    engine.setMaxSpeed(100.0);           // Max robot speed (adjust after testing)
-    engine.setCellSize(20);              // Grid cell size for pathfinding (pixels)
-    engine.setRobotDimensions(90.0, 140.0); // Width, Length (pixels) - collision box
-
-    // ============================================================
-    // ID dance — runs once at startup to identify which robot is ours
-    // ============================================================
-    IDDance   id_dance;
-    MarkerDetector detector;
-    Tracker   tracker;
-    int       my_id = -1;
-    std::vector<RobotTrack> tracks;
-
-    // ============================================================
-    // Main loop
-    // ============================================================
-    double tc0 = high_resolution_time();
-    double tc  = 0.0;
-    int    frame_count = 0;
-    bool   running = true;
-
-    cout << "\n=== PHYSICAL TEST STARTED ===" << endl;
-    cout << "Press 'X' to stop" << endl << endl;
-
-    while (running)
-    {
-        if (KEY('X')) {
-            cout << "\nStopped by user." << endl;
-            break;
-        }
-
-        tc = high_resolution_time() - tc0;
-        if (TEST_DURATION > 0.0 && tc > TEST_DURATION) {
-            cout << "\nTest duration reached." << endl;
-            break;
-        }
-
-        // Grab the latest frame from the webcam
-        acquire_image(rgb, CAM_INDEX);
-
-        // ---- Phase 1: ID dance — spin in place to identify our robot ----
-        // Runs until done(), then engine.setID() is called once and strategy begins.
-        if (my_id < 0) {
-            my_id = id_dance.run(tc, rgb, detector, tracker);
-            Command cmd = id_dance.currentCommand();
-            sendCommand(hSerial, cmd);
-            if (id_dance.done()) {
-                engine.setID(my_id);
-                cout << "ID dance complete — Robot ID: " << my_id << endl;
-                if (PHYS_MODE == 0)
-                    cout << "Mode: NAVIGATION TUNING — driving to ("
-                         << NAV_GOAL_X << ", " << NAV_GOAL_Y << ")" << endl;
-                else
-                    cout << "Mode: FULL STRATEGY" << endl;
-            }
-        }
-        // ---- Phase 2a: Navigation tuning mode ----
-        // Use this to verify marker detection, obstacle detection, pixel scale,
-        // and controller gains (v_max, kL/ka/kb, cell_px) before running full strategy.
-        else if (PHYS_MODE == 0) {
-            Command cmd = engine.update(rgb, tc);
-            sendCommand(hSerial, cmd);
-
-            if (frame_count % 30 == 0) {
-                cout << "NAV | t=" << (int)tc << "s | frame=" << frame_count
-                     << " | L=" << cmd.left << " R=" << cmd.right << endl;
-            }
-        }
-        // ---- Phase 2b: Full strategy mode ----
-        else {
-            Command cmd = engine.update(rgb, tc);
-            sendCommand(hSerial, cmd);
-
-            if (frame_count % 30 == 0) {
-                cout << "STRATEGY | t=" << (int)tc << "s | frame=" << frame_count
-                     << " | L=" << cmd.left << " R=" << cmd.right
-                     << " | laser=" << cmd.laser << endl;
-            }
-        }
-
-        // Display the live camera feed
-        view_rgb_image(rgb);
-
-        frame_count++;
-        // No Sleep() — acquire_image() blocks until the next camera frame is ready.
-        // Strategy runs at the native camera framerate.
+    while (!KEY(VK_SPACE)) {
+        Sleep(50);
     }
 
-    // ============================================================
-    // Stop robot and clean up on exit
-    // ============================================================
+    cout << "\n=== CONTROLS ===" << endl;
+    cout << "  UP ARROW    : Forward" << endl;
+    cout << "  DOWN ARROW  : Backward" << endl;
+    cout << "  LEFT ARROW  : Turn left" << endl;
+    cout << "  RIGHT ARROW : Turn right" << endl;
+    cout << "  SPACE       : Stop" << endl;
+    cout << "  L           : Toggle laser" << endl;
+    cout << "  X           : Exit" << endl;
+    cout << "\nReady! Use arrow keys to control the robot." << endl;
+    cout << "========================================\n" << endl;
+
+    bool laser_on = false;
+    Command cmd   = { 0.0, 0.0, false };
+
+    // One-shot print flags — print direction once per key press
+    bool up_was    = false;
+    bool down_was  = false;
+    bool left_was  = false;
+    bool right_was = false;
+    bool l_was     = false;
+
+    while (true)
+    {
+        // Exit
+        if (KEY('X')) {
+            cout << "Exiting..." << endl;
+            break;
+        }
+
+        // Laser toggle
+        if (KEY('L')) {
+            if (!l_was) {
+                laser_on = !laser_on;
+                cout << "Laser: " << (laser_on ? "ON" : "OFF") << endl;
+                l_was = true;
+            }
+        } else {
+            l_was = false;
+        }
+
+        // Reset command each loop
+        cmd.left  = 0.0;
+        cmd.right = 0.0;
+        cmd.laser = laser_on;
+
+        // Arrow key controls
+        if (KEY(VK_UP)) {
+            cmd.left  = SPEED;
+            cmd.right = SPEED;
+            if (!up_was) { cout << "Forward" << endl; up_was = true; }
+            down_was = left_was = right_was = false;
+        }
+        else if (KEY(VK_DOWN)) {
+            cmd.left  = -SPEED;
+            cmd.right = -SPEED;
+            if (!down_was) { cout << "Backward" << endl; down_was = true; }
+            up_was = left_was = right_was = false;
+        }
+        else if (KEY(VK_LEFT)) {
+            cmd.left  = -TURN_SPEED;
+            cmd.right =  TURN_SPEED;
+            if (!left_was) { cout << "Turn left" << endl; left_was = true; }
+            up_was = down_was = right_was = false;
+        }
+        else if (KEY(VK_RIGHT)) {
+            cmd.left  =  TURN_SPEED;
+            cmd.right = -TURN_SPEED;
+            if (!right_was) { cout << "Turn right" << endl; right_was = true; }
+            up_was = down_was = left_was = false;
+        }
+        else if (KEY(VK_SPACE)) {
+            cmd.left  = 0.0;
+            cmd.right = 0.0;
+            up_was = down_was = left_was = right_was = false;
+        }
+        else {
+            up_was = down_was = left_was = right_was = false;
+        }
+
+        sendCommand(hSerial, cmd);
+        Sleep(50);
+    }
+
+    // Stop robot and clean up
+    cout << "Stopping robot..." << endl;
     sendCommand(hSerial, { 0.0, 0.0, false });
+    Sleep(100);
 
-    if (hSerial != INVALID_HANDLE_VALUE) CloseHandle(hSerial);
-    stop_camera(CAM_INDEX);
-    free_image(rgb);
-    deactivate_vision();
+    CloseHandle(hSerial);
 
-    cout << "\nDuration: " << tc << "s | Frames: " << frame_count << endl;
+    cout << "Done." << endl;
     cout << "Press any key to exit..." << endl;
-    pause();
+    cin.get();
     return 0;
 }

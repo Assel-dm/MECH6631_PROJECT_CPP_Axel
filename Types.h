@@ -61,12 +61,47 @@ inline double dist2d(double x1, double y1, double x2, double y2) {
 }
 
 // --- Robot control helpers ---
-inline int vel_to_pw(double vel) {
-    constexpr int pw_center = 1500;
+// ⭐ CALIBRATED NEUTRAL VALUES - Tested and confirmed
+constexpr int NEUTRAL_LEFT_PW  = 1500;  // Left servo perfect at 1500µs
+constexpr int NEUTRAL_RIGHT_PW = 1480;  // Right servo perfect at 1480µs
+
+// Converts velocity to pulse width for LEFT servo
+inline int vel_to_pw_left(double vel) {
     constexpr int pw_range  = 500;
+    constexpr double deadband = 0.05;  // 5% deadband around zero
+    
     if (vel < -1.0) vel = -1.0;
     if (vel >  1.0) vel =  1.0;
-    return pw_center + static_cast<int>(vel * pw_range);
+    
+    // Apply deadband - force small velocities to exactly zero
+    if (vel > -deadband && vel < deadband) {
+        vel = 0.0;
+    }
+    
+    return NEUTRAL_LEFT_PW + static_cast<int>(vel * pw_range);
+}
+
+// Converts velocity to pulse width for RIGHT servo
+// ⭐ INVERTED because servos are mirrored (mounted opposite directions)
+inline int vel_to_pw_right(double vel) {
+    constexpr int pw_range  = 500;
+    constexpr double deadband = 0.05;  // 5% deadband around zero
+    
+    if (vel < -1.0) vel = -1.0;
+    if (vel >  1.0) vel =  1.0;
+    
+    // Apply deadband - force small velocities to exactly zero
+    if (vel > -deadband && vel < deadband) {
+        vel = 0.0;
+    }
+    
+    // ⭐ INVERT: Negate velocity because right servo is mounted backwards
+    return NEUTRAL_RIGHT_PW - static_cast<int>(vel * pw_range);  // Note the MINUS
+}
+
+// Legacy function - uses left servo calibration (for backward compatibility)
+inline int vel_to_pw(double vel) {
+    return vel_to_pw_left(vel);
 }
 
 // Strategy mode selection

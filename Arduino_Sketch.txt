@@ -1,280 +1,97 @@
-// robot_controller.ino — Arduino Mega 2560 + Bluetooth HC-05
-// MECH6631 Competition Robot - Physical Control System
-// Version: 2.0 - Full Control with Servo Positioning + Digital Laser
-//
-// Receives 6-byte command packets from PC via Bluetooth:
-// Format: [0xFF][pw_l_hi][pw_l_lo][pw_r_hi][pw_r_lo][laser]
-//
-// Hardware: 
-// - 2x ESCs for differential drive motors
-// - 1x Servo for laser turret positioning
-// - 1x Digital pin for laser on/off control
-// - HC-05 Bluetooth module on Serial (pins 0/1)
+// bt_robot_controller.ino — Bluetooth HC-06 on hardware Serial (pins 0/1)
+// Arduino Uno - Upload via USB first, then disconnect USB and connect HC-06
+// HC-06 TX → Pin 0 (RX), HC-06 RX → Pin 1 (TX)
 
 #include <Servo.h>
 
-// ============================================================
-// HARDWARE CONFIGURATION — Adjust pins to match your wiring
-// ============================================================
+// Hardware Configuration
+const int PIN_MOTOR_LEFT   = 9;
+const int PIN_MOTOR_RIGHT  = 10;
+const int PIN_LASER_SERVO  = 11;
+const int PIN_LASER_ENABLE = 8;
 
-// Motor ESC PWM pins
-const int PIN_MOTOR_LEFT  = 9;   // Left wheel ESC signal wire
-const int PIN_MOTOR_RIGHT = 10;  // Right wheel ESC signal wire
+// ⭐ CALIBRATED NEUTRAL VALUES (confirmed working)
+const int NEUTRAL_LEFT  = 1500;
+const int NEUTRAL_RIGHT = 1480;
 
-// Laser system pins
-const int PIN_LASER_SERVO  = 11;  // Servo that rotates laser turret (PWM)
-const int PIN_LASER_ENABLE = 12;  // Digital pin that powers laser on/off
-
-// ============================================================
-// LASER CONTROL MODE SELECTION
-// ============================================================
-// Your robot uses: Servo for positioning + Digital pin for power
-// This is LASER_MODE_FULL_CONTROL
-#define LASER_MODE_FULL_CONTROL
-
-// Alternative modes (leave commented out for your setup):
-// #define LASER_MODE_SERVO_ONLY    // Servo position controls on/off (1000=off, 2000=on)
-// #define LASER_MODE_DIGITAL_PIN   // Only digital pin, no servo positioning
-
-// ============================================================
-// Servo Objects (used for both ESCs and laser servo)
-// ============================================================
-Servo escLeft;
-Servo escRight;
+Servo servoLeft;
+Servo servoRight;
 Servo laserServo;
 
-// ============================================================
-// SAFETY & COMMUNICATION PARAMETERS
-// ============================================================
-const unsigned long TIMEOUT_MS = 500;        // Stop motors if no command for 500ms
-const unsigned long STARTUP_DELAY_MS = 2000; // ESC calibration delay on boot
-const unsigned long PACKET_TIMEOUT_MS = 50;  // Max time to wait for packet completion
-
+// Safety timeout
+const unsigned long TIMEOUT_MS = 500;
 unsigned long lastCommandTime = 0;
-bool emergencyStop = false;
 
-// Packet buffer (6 bytes total)
+// Packet buffer
 uint8_t packet[6];
 int packetIndex = 0;
 bool syncFound = false;
 
-// ============================================================
-// SETUP - Runs once on Arduino power-up or reset
-// ============================================================
 void setup() {
-  // Initialize Bluetooth serial communication
-  // HC-05 default: 9600 baud (must match PC program)
-  Serial.begin(9600);
+  // ⭐ Hardware Serial = HC-06 Bluetooth (pins 0/1)
+  // Upload sketch first via USB, then disconnect USB and wire HC-06
+  Serial.begin(9600);  // HC-06 default baud rate
   
-  // Attach motor ESCs to PWM-capable pins
-  escLeft.attach(PIN_MOTOR_LEFT);
-  escRight.attach(PIN_MOTOR_RIGHT);
-  
-  // Attach laser positioning servo
+  // Attach servos
+  servoLeft.attach(PIN_MOTOR_LEFT);
+  servoRight.attach(PIN_MOTOR_RIGHT);
   laserServo.attach(PIN_LASER_SERVO);
-  
-  // Configure laser enable pin as output
   pinMode(PIN_LASER_ENABLE, OUTPUT);
-  digitalWrite(PIN_LASER_ENABLE, LOW); // Start with laser OFF for safety
   
-  // ⭐ Initialize all outputs to SAFE NEUTRAL state
-  escLeft.writeMicroseconds(1500);   // Neutral (stopped)
-  escRight.writeMicroseconds(1500);  // Neutral (stopped)
-  laserServo.writeMicroseconds(1000); // Safe retracted position
-  
-  // ============================================================
-  // CRITICAL STARTUP DELAY
-  // ============================================================
-  // ESCs need time to detect neutral position (1500µs) during power-up.
-  // If we send commands too early, ESCs may not arm properly.
-  // Wait 2 seconds to ensure proper ESC initialization.
-  Serial.println("========================================");
-  Serial.println("  MECH6631 Robot Controller v2.0");
-  Serial.println("========================================");
-  Serial.println("Initializing ESCs...");
-  Serial.print("Waiting ");
-  Serial.print(STARTUP_DELAY_MS / 1000);
-  Serial.println(" seconds for ESC calibration...");
-  
-  delay(STARTUP_DELAY_MS);
-  
-  Serial.println("✓ ESC initialization complete");
-  Serial.println("✓ Laser system armed");
-  Serial.println("\n--- READY FOR COMMANDS ---");
-  Serial.println("Laser mode: FULL_CONTROL (Servo + Digital Pin)");
-  Serial.println("Waiting for Bluetooth connection...\n");
+  // Set to calibrated neutral immediately
+  servoLeft.writeMicroseconds(NEUTRAL_LEFT);
+  servoRight.writeMicroseconds(NEUTRAL_RIGHT);
+  laserServo.writeMicroseconds(1000);
+  digitalWrite(PIN_LASER_ENABLE, LOW);
   
   lastCommandTime = millis();
 }
 
-// ============================================================
-// MAIN LOOP - Runs continuously
-// ============================================================
 void loop() {
-  // ---- Safety Feature: Emergency Stop via Serial Monitor ----
-  // Type 'S' in Serial Monitor (or send from PC) to halt robot
-  if (Serial.available() > 0) {
-    char c = Serial.peek(); // Check without consuming byte
-    if (c == 'S' || c == 's') {
-      Serial.read(); // Consume the 'S' byte
-      emergencyStop = true;
-      Serial.println("\n*** EMERGENCY STOP ACTIVATED ***");
-      Serial.println("Robot halted. Reset Arduino to resume.");
-      stopMotors();
-      while (true) { 
-        delay(100); // Infinite loop - requires hardware reset
-      }
-    }
-  }
-  
-  // ---- Watchdog Safety: Timeout Protection ----
-  // If PC crashes or Bluetooth disconnects, stop motors automatically
-  unsigned long timeSinceCommand = millis() - lastCommandTime;
-  if (timeSinceCommand > TIMEOUT_MS) {
-    stopMotors();
-    
-    // Print timeout warning once (avoid spam)
-    static bool timeout_printed = false;
-    if (!timeout_printed) {
-      Serial.println("⚠ TIMEOUT - No commands received");
-      Serial.println("Motors stopped. Waiting for PC reconnection...");
-      timeout_printed = true;
-    }
-    
-    // Reset warning flag when connection resumes
-    if (Serial.available() > 0 && Serial.peek() == 0xFF) {
-      timeout_printed = false;
-      Serial.println("✓ Connection restored");
-    }
-    return; // Skip rest of loop until commands resume
-  }
-  
-  // ---- Packet Reception: Buffered Reading ----
-  // More robust than sequential reads - handles byte-level errors
+  // ⭐ STEP 1: Always read Bluetooth packets first
   while (Serial.available() > 0) {
     uint8_t b = Serial.read();
     
-    // Start of packet: sync byte (0xFF)
     if (b == 0xFF) {
       packetIndex = 0;
       packet[packetIndex++] = b;
       syncFound = true;
     }
-    // Accumulate packet data bytes (bytes 1-5)
     else if (syncFound && packetIndex > 0 && packetIndex < 6) {
       packet[packetIndex++] = b;
       
-      // Complete packet received (6 bytes total)
       if (packetIndex == 6) {
-        processCommand(); // Decode and execute
-        lastCommandTime = millis(); // Reset watchdog
+        processCommand();
+        lastCommandTime = millis();
         packetIndex = 0;
         syncFound = false;
       }
     }
-    // Discard garbage bytes (no sync found yet)
-    else if (!syncFound) {
-      // Silently ignore (or debug: Serial.print("?");)
-    }
+  }
+  
+  // ⭐ STEP 2: Timeout AFTER reading - stops if BT disconnects
+  if ((millis() - lastCommandTime) > TIMEOUT_MS) {
+    stopMotors();
   }
 }
 
-// ============================================================
-// PROCESS COMMAND PACKET
-// ============================================================
-// Decodes the 6-byte packet and sends commands to motors/laser
 void processCommand() {
-  // ---- Decode Packet ----
-  // Bytes 1-2: Left motor pulse width (16-bit, big-endian)
-  // Bytes 3-4: Right motor pulse width (16-bit, big-endian)
-  // Byte 5: Laser command (0=off, 1=on)
-  
   uint16_t pw_l = ((uint16_t)packet[1] << 8) | packet[2];
   uint16_t pw_r = ((uint16_t)packet[3] << 8) | packet[4];
   uint8_t  laser = packet[5];
   
-  // ---- Safety Clamping ----
-  // Prevent invalid pulse widths that could damage ESCs
-  // Valid ESC range: 1000µs (full reverse) to 2000µs (full forward)
-  // 1500µs = neutral/stopped
   pw_l = constrain(pw_l, 1000, 2000);
   pw_r = constrain(pw_r, 1000, 2000);
   
-  // ---- Send Motor Commands ----
-  escLeft.writeMicroseconds(pw_l);
-  escRight.writeMicroseconds(pw_r);
-  
-  // ---- Laser Control (Full Control Mode) ----
-  #ifdef LASER_MODE_FULL_CONTROL
-    // Digital pin: Enable/disable laser power
-    digitalWrite(PIN_LASER_ENABLE, laser ? HIGH : LOW);
-    
-    // Servo positioning: Aim laser at target
-    // When laser is ON: center servo (aimed forward)
-    // When laser is OFF: retract servo to safe position
-    if (laser) {
-      laserServo.writeMicroseconds(1500); // Centered/aimed position
-    } else {
-      laserServo.writeMicroseconds(1000); // Retracted/safe position
-    }
-    
-    // ⭐ ALTERNATIVE SERVO BEHAVIORS (uncomment ONE if needed):
-    
-    // Option 1: Keep servo always centered, only control power
-    // laserServo.writeMicroseconds(1500);
-    
-    // Option 2: Custom angle mapping (requires PC code change)
-    // int servo_angle = map(laser, 0, 255, 1000, 2000);
-    // laserServo.writeMicroseconds(servo_angle);
-  #endif
-  
-  // ---- Optional: Debug Output ----
-  // Uncomment to see commands in Serial Monitor (may slow performance)
-  /*
-  Serial.print("L:");
-  Serial.print(pw_l);
-  Serial.print(" R:");
-  Serial.print(pw_r);
-  Serial.print(" Laser:");
-  Serial.println(laser);
-  */
+  servoLeft.writeMicroseconds(pw_l);
+  servoRight.writeMicroseconds(pw_r);
+  digitalWrite(PIN_LASER_ENABLE, laser ? HIGH : LOW);
+  laserServo.writeMicroseconds(laser ? 1500 : 1000);
 }
 
-// ============================================================
-// EMERGENCY STOP FUNCTION
-// ============================================================
-// Called on timeout or 'S' command - brings robot to safe halt
 void stopMotors() {
-  // Set motors to neutral (stopped)
-  escLeft.writeMicroseconds(1500);
-  escRight.writeMicroseconds(1500);
-  
-  // Disable laser
+  servoLeft.writeMicroseconds(NEUTRAL_LEFT);
+  servoRight.writeMicroseconds(NEUTRAL_RIGHT);
   digitalWrite(PIN_LASER_ENABLE, LOW);
-  
-  // Retract laser servo to safe position
   laserServo.writeMicroseconds(1000);
 }
-
-// ============================================================
-// END OF SKETCH
-// ============================================================
-// Upload this to Arduino Mega 2560 via USB
-// Then connect Bluetooth and run program_arduino.cpp on PC
-//
-// Safety checks before first power-on:
-// 1. Motors disconnected from ESCs (test communication first)
-// 2. Robot on blocks (wheels off ground)
-// 3. Separate 7.4V battery for ESCs (not USB power!)
-// 4. Common ground between Arduino and ESC battery
-// 5. Emergency stop tested (type 'S' in Serial Monitor)
-// 6. Fire extinguisher nearby 🧯
-//
-// Pin summary:
-// - Pin 9:  Left ESC
-// - Pin 10: Right ESC
-// - Pin 11: Laser servo
-// - Pin 12: Laser enable (via transistor/MOSFET if >100mA)
-// - Pin 0:  Bluetooth RX (HC-05 TX)
-// - Pin 1:  Bluetooth TX (HC-05 RX via voltage divider)
-// ============================================================
