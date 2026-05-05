@@ -49,7 +49,7 @@ std::optional<std::vector<std::pair<int, int>>> AStarPlanner::plan(
     int gy = goal.first, gx = goal.second;
 
     if (!in_bounds(sy, sx) || !in_bounds(gy, gx)) return std::nullopt;
-    if (grid[gy][gx]) return std::nullopt;  // ⭐ ONLY check goal, not start!
+    if (grid[gy][gx]) return std::nullopt; 
 
     std::vector<std::pair<int, int>> nbrs = {
         {-1,0},{1,0},{0,-1},{0,1},
